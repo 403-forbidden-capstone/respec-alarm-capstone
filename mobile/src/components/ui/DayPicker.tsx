@@ -4,9 +4,11 @@ import { WEEKDAYS, type Weekday } from '@/lib/weekday';
 import { colors } from '@/theme';
 
 import { Text } from './Text';
+import { useAccent } from '@/lib/skyTone';
 
 // 반복 요일 (.days) — 월~일 동그라미, 고른 요일은 검게. 루틴 반복(A04) · 일정 반복(H05)이 같이 씀
 export function DayPicker({ value, onToggle }: { value: readonly Weekday[]; onToggle: (day: Weekday) => void }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <View style={styles.row} accessibilityLabel="반복 요일">
       {WEEKDAYS.map((day) => {
@@ -19,7 +21,7 @@ export function DayPicker({ value, onToggle }: { value: readonly Weekday[]; onTo
             accessibilityRole="checkbox"
             accessibilityLabel={`${day}요일`}
             accessibilityState={{ checked: on }}
-            style={[styles.day, on && styles.on]}
+            style={[styles.day, on && [styles.on, { backgroundColor: accent }]]}
           >
             <Text variant="body" tone={on ? 'inverse' : 'faint'} weight={on ? 600 : 400}>
               {day}

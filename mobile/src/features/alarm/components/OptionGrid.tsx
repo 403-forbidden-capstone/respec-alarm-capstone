@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { colors, radius, size as sizes } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 type Props<T extends string | number> = {
   options: readonly (readonly [T, string])[]; // [값, 보이는 글자]
@@ -14,6 +15,7 @@ type Props<T extends string | number> = {
 // 몇 개 중 하나 고르기 — 중요도 (.opts) · 강도 약 중 강 (.lvopts)
 // mini는 누르는 칸을 44 높이로 잡고, 검은 칸(고른 값)은 그 안에 4씩 들여서 그림 (ui의 Segmented와 같은 모양)
 export function OptionGrid<T extends string | number>({ options, value, onChange, label, size = 'grid' }: Props<T>) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const mini = size === 'mini';
   return (
     <View style={mini ? styles.miniWrap : styles.grid} accessibilityRole="radiogroup" accessibilityLabel={label}>
@@ -31,9 +33,9 @@ export function OptionGrid<T extends string | number>({ options, value, onChange
             accessibilityRole="radio"
             accessibilityLabel={text}
             accessibilityState={{ selected: on }}
-            style={mini ? styles.miniHit : [styles.cell, on && styles.on]}
+            style={mini ? styles.miniHit : [styles.cell, on && [styles.on, { backgroundColor: accent }]]}
           >
-            {mini ? <View style={[styles.miniPill, on && styles.on]}>{body}</View> : body}
+            {mini ? <View style={[styles.miniPill, on && [styles.on, { backgroundColor: accent }]]}>{body}</View> : body}
           </Pressable>
         );
       })}

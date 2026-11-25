@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { EmptyState, Loading, LoadError, Screen, SectionHeader, Text, TopBar, TopBarButton } from '@/components/ui';
+import { Card, EmptyState, Loading, LoadError, Screen, SectionHeader, Sheet, Text, TopBar, TopBarIconButton } from '@/components/ui';
 import { listAppointments } from '@/features/alarm/api';
 import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
@@ -12,8 +12,6 @@ import { useAppointmentToggle } from '@/features/alarm/hooks/useAppointmentToggl
 import { useNow } from '@/features/alarm/hooks/useNow';
 import { useStandaloneAlarmSave } from '@/features/alarm/hooks/useStandaloneAlarmSave';
 import { dayHeading, groupByDay, seriesInfo, splitUpcoming } from '@/features/alarm/schedule';
-import { SkyTone } from '@/features/sky/components/SkyBackdrop';
-import { useSky } from '@/features/sky/hooks/useSky';
 import { formatDateShort } from '@/lib/format';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
@@ -36,6 +34,7 @@ export default function AlarmsScreen() {
   });
   const [showPast, setShowPast] = useState(false);
   const [newAlarm, setNewAlarm] = useState(false);
+  const [adding, setAdding] = useState(false); // "+" — 새 알람 · 새 일정 고르기
   const [expired, setExpired] = useState<string | null>(null);
   const lit = highlight && highlight !== expired ? highlight : null;
   const scrollRef = useRef<ScrollView>(null);
@@ -47,29 +46,22 @@ export default function AlarmsScreen() {
     return () => clearTimeout(id);
   }, [highlight]);
 
-  const sky = useSky(); // 위쪽 하늘 배경 — 홈과 같은 날씨 × 시간대
   const { upcoming, past } = data ? splitUpcoming(data, current) : { upcoming: [], past: [] };
 
   return (
-    <Screen onRefresh={reload} scrollRef={scrollRef} backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
+    <Screen onRefresh={reload} scrollRef={scrollRef}>
       <TopBar
         screenId="H02"
         right={
-          <View style={styles.topActions}>
-            {/* 일정 없이 시각 · 반복만 정하는 기본 알람 (#588) */}
-            <TopBarButton label="+ 새 알람" glass onPress={() => setNewAlarm(true)} />
-            <TopBarButton label="+ 새 일정" glass onPress={() => router.push({ pathname: '/schedule/new', params: { from: 'alarms' } })} />
-          </View>
+          // 새로 만들기는 "+" 하나 — 누르면 새 알람 · 새 일정 중에 고름
+          <TopBarIconButton icon={{ ios: 'plus', android: 'add', web: 'add' }} accessibilityLabel="새 알람 또는 새 일정 만들기" glass onPress={() => setAdding(true)} />
         }
       />
-      <Text variant="title" style={styles.title}>
+      <Text variant="display" style={styles.title}>
         알람
       </Text>
       {/* 친구가 보낸 알람 시각 제안 — 푸시를 누르면 여기로 (친구 10장) */}
       <ProposalCards onChanged={() => void reload()} />
-      <Text variant="lead" tone="skySub">
-        일정마다 기상 · 준비 · 출발 알람을 계산해 두었어요.
-      </Text>
       <View style={styles.links}>
         <TextLink label="학교 시간표 · 반복 일정 지우기" onPress={() => router.push('/timetable')} />
       </View>
@@ -96,7 +88,7 @@ export default function AlarmsScreen() {
           <SectionHeader title={dayHeading(day[0].at, current)} />
           {/* 날짜는 섹션 제목에 있으니 카드 머리줄에는 안 보임 */}
           {day.map((a) => (
-            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} {...seriesInfo(a, current)} />
+            <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} highlight={a.id === lit} showDate={false} variant="compact" {...seriesInfo(a, current)} />
           ))}
         </View>
       ))}
@@ -121,7 +113,7 @@ export default function AlarmsScreen() {
                 <View key={day[0].id}>
                   <SectionHeader title={formatDateShort(day[0].at)} />
                   {day.map((a) => (
-                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} {...seriesInfo(a, current)} />
+                    <AppointmentAlarmCard key={a.id} appointment={a} current={current} onToggle={(on) => toggleAppointment(a, on)} showDate={false} variant="compact" {...seriesInfo(a, current)} />
                   ))}
                 </View>
               ))
@@ -129,15 +121,41 @@ export default function AlarmsScreen() {
         </>
       ) : null}
       {!data && error ? <LoadError onRetry={reload} /> : null}
+      <Sheet visible={adding} onClose={() => setAdding(false)} title="새로 만들기">
+        {/* 일정 없이 시각 · 반복만 정하는 기본 알람 (#588) */}
+        <Card
+          onPress={() => {
+            setAdding(false);
+            setNewAlarm(true);
+          }}
+          accessibilityLabel="새 알람, 시각과 반복만 정해요"
+        >
+          <Text variant="bodyStrong">새 알람</Text>
+          <Text variant="small" tone="sub">
+            시각과 반복만 정해요
+          </Text>
+        </Card>
+        <Card
+          onPress={() => {
+            setAdding(false);
+            router.push({ pathname: '/schedule/new', params: { from: 'alarms' } });
+          }}
+          accessibilityLabel="새 일정, 약속 시각에 맞춰 알람을 계산해요"
+        >
+          <Text variant="bodyStrong">새 일정</Text>
+          <Text variant="small" tone="sub">
+            약속 시각에 맞춰 기상 · 준비 · 출발 알람을 계산해요
+          </Text>
+        </Card>
+      </Sheet>
       <NewAlarmSheet visible={newAlarm} onClose={() => setNewAlarm(false)} current={current} busy={standalone.busy} onSave={standalone.save} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  topActions: { flexDirection: 'row', gap: 8 },
-  links: { marginTop: 8, alignSelf: 'flex-start' },
-  title: { marginTop: 8, marginBottom: 4 },
+  links: { alignSelf: 'flex-start' },
+  title: { marginTop: 4, marginBottom: 12 }, // 설명 글 없이 바로 가기 줄 · 첫 구역으로 이어짐
   empty: { marginTop: 18 },
   pastToggle: {
     flexDirection: 'row',

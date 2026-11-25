@@ -44,8 +44,11 @@ export const colors = {
   ringWave: 'rgba(255, 255, 255, 0.8)', // 음성 파형
 
   // 하늘 배경 위에 얹는 것 (홈 위쪽) — 바탕 색은 아래 skyTint, 해 · 구름 등 그림 색은 scripts/make-sky-assets.py
-  glass: 'rgba(255, 255, 255, 0.5)', // 하늘 배경 위 반투명 버튼 바탕
-  glassLine: 'rgba(255, 255, 255, 0.8)', // 반투명 버튼 테두리
+  glass: 'rgba(255, 255, 255, 0.3)', // 하늘 배경 위 유리 버튼 바탕 — 하늘이 비치게 옅게
+  glassLine: 'rgba(255, 255, 255, 0.7)', // 유리 버튼 테두리 (밝은 가장자리)
+  // 유리 버튼 입체감 — 위쪽 안쪽에 밝은 빛 한 줄 + 아래로 옅은 그림자
+  glassCard: 'rgba(255, 255, 255, 0.55)', // 하늘 위 큰 카드(홈 다음 알람) — 버튼보다 덜 비침
+  glassShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 4px 12px -6px rgba(0, 0, 0, 0.22)',
 } as const;
 
 // 하늘 배경 맨 위 색 — 날씨 × 시간대. 아래로 갈수록 화면 바탕(bg)으로 풀림 (features/sky/sky.ts의 skyColorAt)

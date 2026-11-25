@@ -2,6 +2,7 @@ import { Pressable, StyleSheet } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { colors, radius } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   icon: string; // + · ↳
@@ -13,12 +14,13 @@ type Props = {
 
 // 두 칸 타일 (.tile) — 새 그룹 만들기 · 그룹 참여하기
 export function ActionTile({ icon, title, sub, dark, onPress }: Props) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${title} · ${sub}`}
-      style={({ pressed }) => [styles.tile, dark && styles.dark, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.tile, dark && [styles.dark, { backgroundColor: accent, borderColor: accent }], pressed && styles.pressed]}
     >
       <Text variant="sheetTitle" tone={dark ? 'inverse' : 'ink'} weight={400} style={styles.icon}>
         {icon}

@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { colors } from '@/theme';
 
 import { Text } from './Text';
+import { useAccent } from '@/lib/skyTone';
 
 export type TimelineItem = {
   time: string; // 오전 8:00
@@ -18,6 +19,7 @@ type Props = {
 
 // 시각 순 기록 (.tl) — 그룹원 기상 상태 · 하루 기록 · 변경 기록
 export function Timeline({ items, highlightLast }: Props) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <View>
       {items.map((item, i) => {
@@ -27,7 +29,7 @@ export function Timeline({ items, highlightLast }: Props) {
             <Text variant="label" tone="sub" style={styles.time}>
               {item.time}
             </Text>
-            <View style={[styles.dot, now && styles.dotNow]} />
+            <View style={[styles.dot, now && [styles.dotNow, { backgroundColor: accent }]]} />
             <Text variant="body" tone={item.past ? 'faint' : 'ink'} style={styles.label}>
               {item.label}
             </Text>

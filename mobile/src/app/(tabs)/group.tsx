@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarButton } from '@/components/ui';
+import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarIconButton } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { getPendingSuggestion } from '@/features/records/api';
 import { SuggestionCard } from '@/features/records/components/SuggestionCard';
@@ -28,12 +28,9 @@ import { ActionTile } from '@/features/social/components/ActionTile';
 import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
-import { SkyTone } from '@/features/sky/components/SkyBackdrop';
-import { useSky } from '@/features/sky/hooks/useSky';
 import { GroupWakeCard } from '@/features/social/components/GroupWakeCard';
 import { MiniButton } from '@/features/social/components/MiniButton';
 import { MyHandleCard } from '@/features/social/components/MyHandleCard';
-import { Note } from '@/features/social/components/Note';
 import { PeopleSearchResults } from '@/features/social/components/PeopleSearchResults';
 import { PersonMenuSheet } from '@/features/social/components/PersonMenuSheet';
 import { PersonRow } from '@/features/social/components/PersonRow';
@@ -76,7 +73,6 @@ async function loadSocial(date: string | null) {
 //   친구 탭(목업 F01: 요청 수락 · 친구별 권한 수) · 그룹 탭(목업 G01: 참여 중인 그룹 · 오늘 기상 수)
 // 기상 확인에서 그룹 상세를 열 때 이 탭이 '그룹' 칸으로 밑에 깔림 (lib/nav openGroupDetail, ?seg=group&open=… — 목업 A.openGroup)
 export default function GroupScreen() {
-  const sky = useSky(); // 위쪽 하늘 배경 — 홈과 같은 날씨 × 시간대
   const { seg, open } = useLocalSearchParams<{ seg?: string; open?: string }>();
   // 직접 고른 칸은 같은 열기 요청일 때만 유지 — 다른 화면이 새로 열면(open 값이 바뀜) 그 칸(seg)으로 (목업 A.openGroup)
   const request = `${seg ?? ''}:${open ?? ''}`;
@@ -143,17 +139,14 @@ export default function GroupScreen() {
   const cancel = (p: Person) => act(p, () => cancelFriendRequest(p.id), '취소하지 못했어요. 다시 해 주세요');
 
   return (
-    <Screen onRefresh={reload} backdrop={<SkyTone kind={sky.kind} phase={sky.phase} />}>
+    <Screen onRefresh={reload}>
       <ConsentSheet visible={consentFor != null} busy={workingId != null} onChoose={acceptInvite} onClose={() => setConsentFor(null)} />
       <TopBar
         screenId={tab === 'friend' ? 'F01' : 'G01'}
-        right={<TopBarButton label="권한 관리" glass onPress={() => router.push('/permissions')} />}
+        right={<TopBarIconButton icon={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }} accessibilityLabel="권한 관리" glass onPress={() => router.push('/permissions')} />}
       />
-      <Text variant="title" style={styles.title}>
+      <Text variant="display" style={styles.title}>
         친구와 그룹
-      </Text>
-      <Text variant="lead" tone="skySub" style={styles.lead}>
-        {tab === 'friend' ? '관계를 만들고 서로 공유할 정보를 관리해요.' : '목적에 맞는 그룹을 만들고 공유 범위를 정해요.'}
       </Text>
       {data?.suggestion ? (
         <SuggestionCard suggestion={data.suggestion} onPress={(id) => router.push({ pathname: '/suggestion/[id]', params: { id } })} />
@@ -360,7 +353,6 @@ function FriendTab({
           action={requests.length || sent.length ? undefined : { label: '친구 찾기', onPress: () => setFocusSearch((n) => n + 1) }} // 친구 0 · 요청 0일 때만 (3-21)
         />
       )}
-      <Note>친구는 역할이 아닌 관계예요. 친구가 되어도 알람과 기상 상태는 권한을 허용한 뒤에만 볼 수 있어요.</Note>
     </>
   );
 }
@@ -463,8 +455,7 @@ function Trailing({ label }: { label: string }) {
 }
 
 const styles = StyleSheet.create({
-  title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
+  title: { marginTop: 4, marginBottom: 16 }, // 설명 글 없이 첫 카드로 — 붙어 보이지 않게 16
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
   requestActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 10 },

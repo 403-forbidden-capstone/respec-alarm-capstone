@@ -4,6 +4,7 @@ import { Card, Text } from '@/components/ui';
 import { colors } from '@/theme';
 
 import { AGE_CHECK_HINT, AGE_CHECK_LABEL, type ConsentItem } from '../consent';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   items: readonly ConsentItem[];
@@ -13,6 +14,7 @@ type Props = {
 
 // 개인정보 안내 단계 (L02-7) — 항목마다 읽는 것 / 안 읽는 것 / 친구에게 보이는 것. 동의 저장은 부르는 화면이 함
 export function ConsentStep({ items, ageChecked, onAgeChange }: Props) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <>
       {items.map((item) => (
@@ -31,7 +33,7 @@ export function ConsentStep({ items, ageChecked, onAgeChange }: Props) {
           accessibilityLabel={AGE_CHECK_LABEL}
           style={styles.age}
         >
-          <View style={[styles.box, ageChecked && styles.boxOn]}>{ageChecked ? <Text variant="small" style={styles.tick}>✓</Text> : null}</View>
+          <View style={[styles.box, ageChecked && [styles.boxOn, { backgroundColor: accent }]]}>{ageChecked ? <Text variant="small" style={styles.tick}>✓</Text> : null}</View>
           <View style={styles.ageText}>
             <Text variant="bodyStrong">{AGE_CHECK_LABEL}</Text>
             {!ageChecked ? (

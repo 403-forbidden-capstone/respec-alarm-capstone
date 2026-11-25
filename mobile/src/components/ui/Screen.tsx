@@ -4,6 +4,7 @@ import { use, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useSkyTone } from '@/lib/skyTone';
 import { colors, space } from '@/theme';
 
 type Props = {
@@ -26,7 +27,7 @@ function ScrollToTopOnTabPress({ target }: { target: RefObject<ScrollView | null
   return null;
 }
 
-// 화면 바탕 · 좌우 여백 · 안전 영역을 맞춘 화면 틀
+// 화면 바탕 · 좌우 여백 · 안전 영역을 맞춘 화면 틀. 바탕에는 그 시각 하늘 색이 살짝 섞임 (모든 화면 공통)
 // 아래 안전 영역(시스템 내비게이션 막대)은 늘 잡음. 키보드가 올라오면 입력칸 · 아래 고정 버튼(footer)이 키보드 위로 밀려 올라감
 export function Screen({ children, scroll = true, footer, contentStyle, onRefresh, avoidKeyboard = true, scrollRef: outerRef, backdrop }: Props) {
   const innerRef = useRef<ScrollView>(null);
@@ -35,6 +36,7 @@ export function Screen({ children, scroll = true, footer, contentStyle, onRefres
   const route = use(NavigationRouteContext);
   const inNavigation = navigation != null && route != null;
   const [refreshing, setRefreshing] = useState(false);
+  const { base } = useSkyTone(); // 바탕 톤 — 그 시각 하늘 색이 살짝 섞인 색 (lib/skyTone)
 
   async function refresh() {
     if (!onRefresh) return;
@@ -50,7 +52,7 @@ export function Screen({ children, scroll = true, footer, contentStyle, onRefres
   const edges = Platform.OS === 'web' && !footer ? (['top'] as const) : (['top', 'bottom'] as const);
 
   return (
-    <SafeAreaView style={styles.safe} edges={edges}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: base }]} edges={edges}>
       {backdrop}
       <KeyboardAvoidingView style={styles.fill} behavior={avoidKeyboard ? keyboardBehavior : undefined} enabled={avoidKeyboard}>
         {scroll ? (
@@ -78,5 +80,5 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   fill: { flex: 1 },
   content: { paddingHorizontal: space.screenX, paddingBottom: 28 },
-  footer: { paddingHorizontal: space.screenX, paddingTop: 8, paddingBottom: 12, backgroundColor: colors.bg },
+  footer: { paddingHorizontal: space.screenX, paddingTop: 8, paddingBottom: 12 },
 });

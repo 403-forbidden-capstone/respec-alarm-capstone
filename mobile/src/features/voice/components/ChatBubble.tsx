@@ -4,10 +4,12 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui';
 import { formatTime } from '@/lib/format';
 import { colors } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 // 말풍선 틀 (.msg) — AI는 왼쪽 흰 풍선, 나는 오른쪽 검은 풍선. wide = 찾은 일정 카드처럼 넓게
 export function Bubble({ who, wide, children }: { who: 'ai' | 'me'; wide?: boolean; children: ReactNode }) {
-  return <View style={[styles.base, who === 'me' ? styles.me : styles.ai, wide && styles.wide]}>{children}</View>;
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
+  return <View style={[styles.base, who === 'me' ? [styles.me, { backgroundColor: accent }] : styles.ai, wide && styles.wide]}>{children}</View>;
 }
 
 // 보낸 시각 (AI · 오후 9:20)

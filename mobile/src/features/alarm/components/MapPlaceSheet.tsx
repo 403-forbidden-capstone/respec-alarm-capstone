@@ -23,6 +23,7 @@ import { noResultTitle, placeSubtitle } from '../placeSheet';
 import type { LatLng, PinAddress, Place } from '../types';
 import { MapView } from './MapView';
 import { RadiusPicker } from './RadiusPicker';
+import { useAccent } from '@/lib/skyTone';
 
 const DEFAULT_NAMES = ['집', '학교', '회사']; // 이름 칩 (suggestedNames를 안 주면)
 const MAP_HEIGHT = 300;
@@ -69,6 +70,7 @@ type Pin = { kind: 'loading' } | { kind: 'done'; address: PinAddress | null } | 
 
 // 시트 안에서 그려지는 본문 — 시트가 열릴 때마다 새로 떠서 상태가 초기화됨 (시트 내용은 루트에서 그려지므로 상태를 여기에 둠)
 function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames, areaWarning = AREA_WARNING, radius: radiusOption, initialQuery }: Omit<Props, 'visible' | 'onClose' | 'title'>) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const [text, setText] = useState(initialQuery ?? ''); // 검색 칸
   const [listOpen, setListOpen] = useState(Boolean(initialQuery?.trim())); // 검색 결과 목록이 지도 위에 뜸 (글자를 칠 때 열리고, 결과를 고르면 닫힘)
   const [point, setPoint] = useState<LatLng | null>(center ?? null); // 핀이 놓인 자리
@@ -302,7 +304,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
               accessibilityLabel={label}
               accessibilityState={{ selected: on }}
               hitSlop={{ top: 8, bottom: 8 }}
-              style={[styles.nameChip, on && styles.nameChipOn]}
+              style={[styles.nameChip, on && [styles.nameChipOn, { backgroundColor: accent }]]}
             >
               <Text variant="label" tone={on ? 'inverse' : 'ink'}>
                 {label}

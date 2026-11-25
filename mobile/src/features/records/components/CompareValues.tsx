@@ -2,6 +2,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/ui';
 import { colors } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 // 기존 → 제안 값 비교 — 시각이 아닌 제안(말소리 · 배경음 · 진동)용. CompareTimes와 같은 모양, 제안 칸은 검게
 export function CompareValues({ before, after }: { before: string; after: string }) {
@@ -17,8 +18,9 @@ export function CompareValues({ before, after }: { before: string; after: string
 }
 
 function Box({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
-    <View style={[styles.box, highlight && styles.boxNew]} accessible accessibilityLabel={`${label} ${value}`}>
+    <View style={[styles.box, highlight && [styles.boxNew, { backgroundColor: accent }]]} accessible accessibilityLabel={`${label} ${value}`}>
       <Text variant="caption" tone={highlight ? 'inverse' : 'ink'} align="center" style={styles.label}>
         {label}
       </Text>

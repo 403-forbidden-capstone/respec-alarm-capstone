@@ -14,11 +14,12 @@ import {
   Text,
   toast,
   TopBar,
-  TopBarButton,
+  TopBarIconButton,
 } from '@/components/ui';
 import { cancelSnooze, getAutoWake, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
 import { AutoWakeCard } from '@/features/alarm/components/AutoWakeCard';
 import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
+import { getGroupSummary, listGroups } from '@/features/social/api';
 import { ProposalCards } from '@/features/social/components/ProposalCards';
 import { ReceivedWakePingLine } from '@/features/social/components/ReceivedWakePingLine';
 import { AppointmentAlarmCard } from '@/features/alarm/components/AppointmentAlarmCard';
@@ -42,6 +43,7 @@ import { TodoList } from '@/features/routine/components/TodoList';
 import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
 import { useSky } from '@/features/sky/hooks/useSky';
 import { dayPartOfPhase, skyGreeting, type DayPart } from '@/features/sky/sky';
+import { groupWakeLine } from '@/features/social/wakeTexts';
 import { now } from '@/lib/clock';
 import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 import { canUseRealData, isMock } from '@/lib/mode';
@@ -69,16 +71,29 @@ async function loadHome() {
   ]);
   // 자동 판정으로 확정한 기상 — 확정 뒤 60분 안 [아니에요] 카드 (D61 1탭 정정). 위 getWakeInProgress가 읽으면서 확정하므로 그 뒤에 읽음. 덧붙임 카드라 못 읽어도 홈은 그대로
   const autoWake = await getAutoWake().catch(() => null);
-  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake };
+  // 다음 알람이 그룹 약속이면 흐름 카드 아래 "같이 준비하는 사람" 줄 — 덧붙임 줄이라 못 읽어도 홈은 그대로
+  const together = await loadTogether(next?.appointment.groupName ?? null).catch(() => null);
+  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together };
 }
 
-// 인사말의 때 — 저녁 화면이면 저녁, 아니면 정오 앞뒤로 아침 · 오후. 문구는 날씨와 합쳐 features/sky의 skyGreeting이 만듦
-function dayPart(t: Date): DayPart {
+// 같이 준비하는 그룹 줄 — 멤버 이름 앞 글자(나는 빼고)와 오늘 기상 수. 일정에는 그룹 이름만 있어 이름으로 찾음
+async function loadTogether(groupName: string | null) {
+  if (!groupName) return null;
+  const group = (await listGroups(null)).find((g) => g.name === groupName);
+  const summary = group ? await getGroupSummary(group.id, null) : null;
+  if (!summary) return null;
+  const line = groupWakeLine(summary.wokeCount, summary.trip);
+  return { faces: summary.members.map((m) => m.person.initial), line: line ? `${summary.name} · ${line}` : summary.name };
+}
+
+// 인사말의 때 — 저녁 화면이면 저녁, 해 뜨기 전이면 새벽, 아니면 정오 앞뒤로 아침 · 오후. 문구는 날씨와 합쳐 features/sky의 skyGreeting이 만듦
+function dayPart(t: Date, beforeSunrise: boolean): DayPart {
   if (isEvening(t)) return 'evening';
+  if (beforeSunrise) return 'dawn';
   return minuteOfDay(t) < 12 * 60 ? 'morning' : 'afternoon';
 }
 
-// H01 홈 — 다음 알람 · 오늘 일정 · 루틴 · 준비물 · 맨 아래 나의 기록(R02 월간 · 주간 · 일간, D110)
+// H01 홈 — 다음 알람(오늘 아침 흐름) · 오늘 일정 · 루틴 · 준비물 · 맨 아래 나의 기록(R02 이번 주 요약, "자세히"로 월간 · 주간 · 일간, D110)
 export default function HomeScreen() {
   const { data, error, reload } = useLoad(loadHome);
   // 당겨서 새로고침 — 홈 내용 + 아래 기록 구역(보이는 월간 · 주간 · 일간)이 맡겨 둔 다시 읽기
@@ -110,7 +125,7 @@ export default function HomeScreen() {
       {error ? <LoadError onRetry={reload} /> : <Loading text="홈을 불러오는 중" />}
     </Screen>
   );
-  const { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake } = data;
+  const { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together } = data;
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김
   const newSchedule = () => router.push({ pathname: '/schedule/new', params: { from: 'home', date: dayKey(target) } });
 
@@ -153,6 +168,10 @@ export default function HomeScreen() {
   const snoozed = snooze != null && snooze.at.getTime() > current.getTime();
   const permissionSummary = bannerSummary(bannerLines(permissions.snapshot, { failedCount: failedAlarms, hasAlarm: next != null }));
 
+  // 설정 — 홈 위 오른쪽 모서리의 둥근 유리 버튼 (D90 기본안 A). 해 · 달 그림은 인사말 옆에 있어 안 겹침 (SkyBackdrop sunAt · moonAt). 실데이터를 쓸 수 있을 때만 (아니면 _layout에서 settings가 빠져 막다른 길)
+  const settingsButton = canUseRealData ? (
+    <TopBarIconButton icon={{ ios: 'gearshape', android: 'settings', web: 'settings' }} accessibilityLabel="설정" glass onPress={() => router.push('/settings')} />
+  ) : null;
   return (
     <Screen onRefresh={refresh} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
       <TopBar
@@ -162,11 +181,10 @@ export default function HomeScreen() {
             {formatDate(current)}
           </Text>
         }
-        // D90 기본안 A — 홈 위 오른쪽. '알람 전체'는 2번 탭이 되어 뺌 (D110). 설정은 실데이터를 쓸 수 있을 때만 (아니면 _layout에서 settings가 빠져 막다른 길)
-        right={canUseRealData ? <TopBarButton label="설정" glass onPress={() => router.push('/settings')} /> : undefined}
+        right={settingsButton ? <View style={styles.gearCorner}>{settingsButton}</View> : undefined}
       />
-      <Text variant="title" style={styles.title}>
-        {skyGreeting(sky.kind, sky.preview ? dayPartOfPhase(sky.phase) : dayPart(current))}
+      <Text variant="display" style={styles.title}>
+        {skyGreeting(sky.kind, sky.preview ? dayPartOfPhase(sky.phase) : dayPart(current, sky.beforeSunrise))}
       </Text>
 
       {permissionSummary ? <PermissionBanner text={permissionSummary} onPress={() => router.push('/ring-check')} /> : null}
@@ -229,7 +247,7 @@ export default function HomeScreen() {
 
       <SectionHeader title="다음 알람" right={next ? formatRelative(current, next.alarm.at) : undefined} />
       {next ? (
-        <AppointmentAlarmCard appointment={next.appointment} current={current} onToggle={(on) => toggleAppointment(next.appointment, on)} />
+        <AppointmentAlarmCard appointment={next.appointment} current={current} onToggle={(on) => toggleAppointment(next.appointment, on)} variant="flow" together={together} />
       ) : (
         <EmptyState
           title="예정된 알람이 없어요"
@@ -238,7 +256,7 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* 기상 알람 60분 전부터 [먼저 깼어요] — 누르면 카드가 사라지고 그룹 줄의 내 상태가 '일어났어요'로 */}
+      {/* 기상 알람 60분 전부터 [먼저 깼어요] 한 줄 — 누르면 줄이 사라지고 그룹 줄의 내 상태가 '일어났어요'로 */}
       {early ? (
         <EarlyWakeCard
           early={early}
@@ -314,7 +332,8 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   links: { flexDirection: 'row', gap: 14 },
-  title: { marginTop: 8, marginBottom: 4 },
+  gearCorner: { marginRight: -10 }, // 버튼을 화면 여백 쪽으로 조금 밀어 모서리에 붙임
+  title: { marginTop: 4, marginBottom: 12 }, // 날짜와는 가깝게(한 묶음), 아래 내용과는 띄움
   ctaText: { marginTop: 4 },
   ctaButton: { marginTop: 12 },
   cardSub: { marginTop: 2 },

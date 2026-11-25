@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/ui';
 import { presetName } from '@/features/location/radius';
 import { colors, radius, size } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   value: number; // 지금 고른 반경(m)
@@ -15,6 +16,7 @@ type Props = {
 // value가 어느 프리셋도 아니면(저장돼 있던 사용자 지정 값) 칸은 모두 꺼져 있고 "지금 200m"로 알려 줌
 // <RadiusPicker value={150} presets={[100, 150, 300]} hint="이 원 안에 들어오면 도착으로 기록해요" onChange={setRadius} />
 export function RadiusPicker({ value, presets, hint, onChange }: Props) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const custom = !presets.includes(value);
   return (
     <View style={styles.wrap}>
@@ -37,7 +39,7 @@ export function RadiusPicker({ value, presets, hint, onChange }: Props) {
               accessibilityRole="radio"
               accessibilityLabel={name ? `${name} ${meters}미터` : `${meters}미터`}
               accessibilityState={{ checked: on }}
-              style={({ pressed }) => [styles.cell, on && styles.cellOn, pressed && styles.pressed]}
+              style={({ pressed }) => [styles.cell, on && [styles.cellOn, { backgroundColor: accent }], pressed && styles.pressed]}
             >
               {name ? (
                 <Text variant="label" tone={on ? 'inverse' : 'ink'}>

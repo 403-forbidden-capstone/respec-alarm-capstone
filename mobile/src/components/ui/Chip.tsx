@@ -1,5 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
+import { useAccent } from '@/lib/skyTone';
 import { colors, radius, size } from '@/theme';
 
 import { Text } from './Text';
@@ -11,8 +12,9 @@ type Props = {
 
 // 작은 꼬리표 (.chip) — 강도 · 반복 · 출처 같은 짧은 정보
 export function Chip({ label, variant = 'outline' }: Props) {
+  const accent = useAccent(); // 채운 칩은 포인트 색 (lib/skyTone)
   return (
-    <View style={[styles.base, styles[variant]]}>
+    <View style={[styles.base, styles[variant], variant === 'ink' && { backgroundColor: accent, borderColor: accent }]}>
       <Text variant="label" tone={variant === 'ink' ? 'inverse' : 'ink'} numberOfLines={1}>
         {label}
       </Text>

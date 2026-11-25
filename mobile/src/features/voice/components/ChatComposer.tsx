@@ -3,6 +3,7 @@ import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Text } from '@/components/ui';
 import { colors, typeScale } from '@/theme';
+import { useAccent } from '@/lib/skyTone';
 
 type Props = {
   status: string; // 듣고 있어요… · 말할 준비가 됐어요 등
@@ -100,6 +101,7 @@ function Pill({ label, on, disabled, onPress }: { label: string; on?: boolean; d
 
 // 말하기 (.mic) — 듣는 동안 테두리가 퍼짐 (.mic.listen)
 function MicButton({ label, listening, disabled, onPress }: { label: string; listening: boolean; disabled: boolean; onPress: () => void }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   const [pulse] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
@@ -115,7 +117,7 @@ function MicButton({ label, listening, disabled, onPress }: { label: string; lis
       {listening ? (
         <Animated.View
           style={[
-            styles.ring,
+            [styles.ring, { backgroundColor: accent }],
             {
               opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0] }),
               transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.4] }) }],
@@ -129,7 +131,7 @@ function MicButton({ label, listening, disabled, onPress }: { label: string; lis
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityState={{ disabled, busy: listening }}
-        style={({ pressed }) => [styles.mic, disabled && !listening && styles.micOff, pressed && styles.pressed]}
+        style={({ pressed }) => [[styles.mic, { backgroundColor: accent }], disabled && !listening && styles.micOff, pressed && styles.pressed]}
       >
         <Text variant="note" tone="inverse" weight={600}>
           {label}

@@ -7,6 +7,7 @@ import { calendarRows } from '../calendar';
 import type { DayMark, MonthDay, MonthRecord } from '../types';
 
 import { CalendarHeader } from './CalendarHeader';
+import { useAccent } from '@/lib/skyTone';
 
 const WEEK = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -45,6 +46,7 @@ export function MonthCalendar({ record, onPrev, onNext, onPressDay }: Props) {
 }
 
 function DayCell({ day: d, onPress }: { day: MonthDay; onPress: () => void }) {
+  const accent = useAccent(); // 포인트 색 — 그 시각 하늘과 같은 계열 (lib/skyTone)
   return (
     <Pressable
       onPress={onPress}
@@ -52,7 +54,7 @@ function DayCell({ day: d, onPress }: { day: MonthDay; onPress: () => void }) {
       accessibilityLabel={`${d.day}일${d.isToday ? ' 오늘' : ''}${d.isFuture ? ' 아직 오지 않은 날' : ''}${d.mark === 'none' ? '' : ` ${MARK_LABEL[d.mark]}`}`}
       style={({ pressed }) => [styles.cell, pressed && styles.pressed]}
     >
-      <View style={[styles.num, d.isToday && styles.today]}>
+      <View style={[styles.num, d.isToday && [styles.today, { backgroundColor: accent }]]}>
         <Text variant="note" tone={d.isToday ? 'inverse' : d.isFuture ? 'faint' : 'ink'} weight={d.isToday ? 600 : 400} style={styles.numText}>
           {d.day}
         </Text>

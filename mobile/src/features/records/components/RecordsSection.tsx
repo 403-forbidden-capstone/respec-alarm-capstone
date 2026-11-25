@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, Loading, SectionHeader, Segmented, Text, Timeline, toast, type TimelineItem } from '@/components/ui';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { dayRelative } from '@/features/records/calendar';
 import { CalendarHeader } from '@/features/records/components/CalendarHeader';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
@@ -21,6 +22,8 @@ import {
 } from '@/features/records/navigation';
 import type { TimelineRow, WeekSummary } from '@/features/records/types';
 import { dateParts, dayKey, formatDate, formatTime, isSameDay, timeParts } from '@/lib/format';
+import { useAccent } from '@/lib/skyTone';
+import { colors } from '@/theme';
 
 const VIEWS = [
   ['month', '월간'],
@@ -37,6 +40,7 @@ export type Register = (reload: (() => Promise<unknown>) | null) => void;
 type PressDay = (d: { date: Date; isFuture: boolean }) => void;
 
 // R02 나의 기록 — 월간 달력 · 주간 기상 흐름 · 일간(설정한 값과 실제로 일어난 일)
+// 홈에서는 접힌 요약(이번 주 날짜 줄 · 평균 기상 · 목표 기상률 · AI 코칭 한 카드)만 보이고, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간이 펴짐
 // 기록 탭이 없어지고 홈(H01) 맨 아래에 붙음 (D110). 당겨서 새로고침은 홈이 register로 받은 다시 읽기를 같이 부름
 // 읽기는 features/records/hooks/useRecords (부품은 api.ts를 직접 부르지 않음 — CLAUDE.md 화면 절)
 // 화살표로 앞뒤 달 · 주 · 날을 넘기고, 달력 · 주간 줄의 날짜 · 주간 막대를 누르면 그 날의 일간으로 (D48). 일정 추가 · 상세는 src/app/schedule/
@@ -44,6 +48,7 @@ type PressDay = (d: { date: Date; isFuture: boolean }) => void;
 export function RecordsSection({ register }: { register: Register }) {
   const today = useRecordToday();
   const [nav, setNav] = useState(() => initialNav(today));
+  const [open, setOpen] = useState(false); // 접힘 = 이번 주 요약 한 카드
 
   // 월간 · 주간의 날짜 · 주간 막대 → 그 날의 일간. 아직 오지 않은 날은 남은 기록이 없어 열지 않음
   const pressDay: PressDay = (d) => {
@@ -53,7 +58,10 @@ export function RecordsSection({ register }: { register: Register }) {
 
   return (
     <>
-      <SectionHeader title="나의 기록" />
+      <SectionHeader title="나의 기록" right={<TextLink label={open ? '접기' : '자세히 ›'} onPress={() => setOpen((v) => !v)} />} />
+      {open ? null : <WeekDigest today={today} onPressDay={(d) => { pressDay(d); if (!d.isFuture) setOpen(true); }} register={register} />}
+      {open ? (
+      <>
       <Segmented options={VIEWS} value={nav.view} onChange={(view) => setNav((n) => selectView(n, view))} />
 
       <View style={styles.body}>
@@ -85,7 +93,74 @@ export function RecordsSection({ register }: { register: Register }) {
           />
         )}
       </View>
+      </>
+      ) : null}
     </>
+  );
+}
+
+// 접힌 요약 — 이번 주 한 카드: 날짜 줄(기록 있는 날 점) · 평균 기상 · 목표 기상률 · AI 코칭 한 문단 + 루틴 만들기
+function WeekDigest({ today, onPressDay, register }: { today: Date; onPressDay: PressDay; register: Register }) {
+  const accent = useAccent(); // 오늘 날짜 · 기록 점 — 포인트 색 (lib/skyTone)
+  const { data, error, reload, emptyText } = useWeekRecord(today);
+  useRegister(register, reload);
+  if (!data) return error ? <LoadError onRetry={reload} /> : <Loading />;
+  const s = data.summary;
+
+  return (
+    <Card>
+      <View style={styles.digestWeek}>
+        {data.strip.map((d) => (
+          <Pressable
+            key={d.day}
+            onPress={() => onPressDay(d)}
+            style={({ pressed }) => [styles.digestCell, pressed && styles.digestPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`${d.weekday}요일 ${d.day}일${d.isToday ? ' 오늘' : ''}${d.isFuture ? ' 아직 오지 않은 날' : ''}${d.recorded ? ' 기록 있음' : ''}`}
+          >
+            <Text variant="caption" tone="sub">
+              {d.weekday}
+            </Text>
+            <View style={[styles.digestDay, d.isToday && { backgroundColor: accent }]}>
+              <Text variant="small" tone={d.isToday ? 'inverse' : d.isFuture ? 'faint' : 'ink'} weight={600}>
+                {d.day}
+              </Text>
+            </View>
+            <View style={[styles.digestDot, d.recorded && { backgroundColor: accent }]} />
+          </Pressable>
+        ))}
+      </View>
+      {s ? (
+        <>
+          <View style={styles.digestStats}>
+            <View style={styles.digestStat}>
+              <Text variant="label">평균 기상</Text>
+              <Text variant="section">{timeParts(s.averageWake).hm}</Text>
+              <Text variant="caption">{s.averageText}</Text>
+            </View>
+            <View style={styles.digestStat}>
+              <Text variant="label">목표 기상률</Text>
+              <Text variant="section">{`${s.goalRate}%`}</Text>
+              <Text variant="caption">{s.goalText}</Text>
+            </View>
+          </View>
+          {/* AI 코칭 글이 없으면(실데이터에서 그 주 일기가 없을 때) 이 칸을 접음 */}
+          {s.coaching ? (
+            <View style={styles.digestCoach}>
+              <Text variant="label">{data.relative} AI 코칭</Text>
+              <Text variant="body">{s.coaching}</Text>
+              <View style={styles.digestLink}>
+                <TextLink label="루틴 만들기 ›" onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(today) } })} strong />
+              </View>
+            </View>
+          ) : null}
+        </>
+      ) : (
+        <Text variant="body" tone="sub" style={styles.digestEmpty}>
+          {emptyText}
+        </Text>
+      )}
+    </Card>
   );
 }
 
@@ -314,4 +389,14 @@ const styles = StyleSheet.create({
   note: { marginTop: 10 },
   coachAction: { marginTop: 12 },
   todayRow: { marginBottom: 12 },
+  digestWeek: { flexDirection: 'row', justifyContent: 'space-between' },
+  digestCell: { flex: 1, alignItems: 'center', gap: 4, minHeight: 44 },
+  digestPressed: { opacity: 0.6 },
+  digestDay: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  digestDot: { width: 4, height: 4, borderRadius: 2 },
+  digestStats: { flexDirection: 'row', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.line },
+  digestStat: { flex: 1, gap: 1 },
+  digestCoach: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.line, gap: 4 },
+  digestLink: { alignItems: 'flex-start', marginTop: 4 },
+  digestEmpty: { marginTop: 12 },
 });
