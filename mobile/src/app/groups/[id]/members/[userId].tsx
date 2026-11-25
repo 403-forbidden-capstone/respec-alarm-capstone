@@ -13,7 +13,6 @@ import {
   WAKE_PING_FAILED,
   WAKE_STALE_TEXT,
   dayLinesOf,
-  wakeScopeOf,
   wakePingLocks,
   wakePingNote,
   wakePingSent,
@@ -56,7 +55,7 @@ export default function MemberWakeScreen() {
   }
 
   const { person: p, groupName, state, canViewAlarm, noGroupAppointment } = data;
-  const scope = wakeScopeOf(p.short, groupName, data.tripVisible);
+  const scopeText = data.tripVisible ? '기상 · 출발 · 도착 시각만 보여요' : '기상 시각만 보여요'; // 공유 범위 한 줄
   const lines = dayLinesOf(data, current); // 오늘의 흐름 — 알람 울림 · 기상 확인 · 출발 · 도착 중 아는 것만
   const nowIndex = lines.reduce((last, line, i) => (line.at.getTime() <= current.getTime() ? i : last), -1); // 지난 줄 중 마지막 = 지금(진한 점)
 
@@ -78,9 +77,6 @@ export default function MemberWakeScreen() {
       <TopBar onBack={backOrHome} screenId="G03" />
       <Text variant="title" style={styles.title}>
         {p.short}님의 기상 상태
-      </Text>
-      <Text variant="lead" style={styles.lead}>
-        알람을 끈 것만으로는 일어난 것으로 보지 않아요.
       </Text>
       {stale ? (
         <Text variant="small" tone="warn" style={styles.stale} accessibilityLiveRegion="polite">
@@ -121,17 +117,23 @@ export default function MemberWakeScreen() {
           <Text variant="label" tone="sub" style={styles.label}>
             오늘의 흐름
           </Text>
-          {lines.map((line, i) => (
-            <View key={line.label} style={styles.line}>
-              <Text variant="small" tone="sub" style={styles.lineTime}>
-                {formatTime(line.at)}
-              </Text>
-              <View style={[styles.lineDot, i === nowIndex && [styles.lineDotNow, { backgroundColor: accent }]]} />
-              <Text variant="body" tone={i > nowIndex ? 'faint' : undefined}>
-                {line.label}
-              </Text>
-            </View>
-          ))}
+          {/* 홈 다음 알람 카드와 같은 가로 점 줄 — 각 점 아래 시각 · 이름, 가장 최근 단계만 포인트 색 */}
+          <View style={styles.steps}>
+            {lines.map((line, i) => (
+              <View key={line.label} style={styles.step}>
+                <View style={styles.stepRail}>
+                  <View style={[styles.stepDot, i <= nowIndex && styles.stepDotDone, i === nowIndex && { backgroundColor: accent, borderColor: accent }]} />
+                  {i < lines.length - 1 ? <View style={styles.stepBar} /> : null}
+                </View>
+                <Text variant="label" tone="ink" weight={i === nowIndex ? 700 : 400}>
+                  {formatTime(line.at)}
+                </Text>
+                <Text variant="caption" tone={i > nowIndex ? 'faint' : 'sub'}>
+                  {line.label}
+                </Text>
+              </View>
+            ))}
+          </View>
         </Card>
       ) : null}
 
@@ -139,26 +141,24 @@ export default function MemberWakeScreen() {
         <Text variant="label" tone="sub" style={styles.label}>
           공유 범위
         </Text>
-        <Text variant="bodyStrong">{scope.title}</Text>
-        <Text variant="small" tone="sub" style={styles.paragraph}>
-          {scope.body}
-        </Text>
+        <Text variant="bodyStrong">{scopeText}</Text>
       </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
+  title: { marginTop: 8, marginBottom: 18 },
   stale: { marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
-  // 목업 G03 .tl — 시각 · 작은 점 · 글자, 줄 사이 선 없음, 지금 줄만 진한 점
-  line: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9 },
-  lineTime: { width: 76 },
-  lineDot: { width: 7, height: 7, borderRadius: 4, marginRight: 4, backgroundColor: colors.line },
-  lineDotNow: { backgroundColor: colors.ink },
+  // 홈 AlarmCard 단계 줄과 같은 모양 (styles.steps / step / stepRail / stepDot / stepBar)
+  steps: { flexDirection: 'row' },
+  step: { flex: 1, gap: 1 },
+  stepRail: { flexDirection: 'row', alignItems: 'center', height: 14, marginBottom: 4 },
+  stepDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.faint, backgroundColor: colors.card },
+  stepDotDone: { backgroundColor: colors.faint },
+  stepBar: { flex: 1, height: 1.5, backgroundColor: colors.line, marginHorizontal: 4 },
   label: { marginBottom: 8 },
   paragraph: { marginTop: 4, lineHeight: 20 },
   stack: { gap: 10, marginTop: 4, marginBottom: 12 },

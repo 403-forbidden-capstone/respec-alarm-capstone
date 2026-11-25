@@ -1,7 +1,7 @@
 import { prepareRecentLabel, prepareSourceLabel } from '@shared/calc/prepare.ts';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadError, Screen, Sheet, Stepper, Text, toast, Toggle, TopBar } from '@/components/ui';
 import { getAppointment, listOccurrences, listPlaces, listStandaloneWakes, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
@@ -15,7 +15,6 @@ import { RepeatScopeSheet } from '@/features/alarm/components/RepeatScopeSheet';
 import { ScheduleEditSheet } from '@/features/alarm/components/ScheduleEditSheet';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { previewAlarmId } from '@/features/alarm/ringPreview';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimeSheet } from '@/features/alarm/components/TimePicker';
@@ -49,6 +48,7 @@ import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLeaveGuard } from '@/lib/useLeaveGuard';
 import { useLoad } from '@/lib/useLoad';
+import { useAccent } from '@/lib/skyTone';
 import { colors } from '@/theme';
 
 const NB = ' '; // 붙임 공백 — 이 자리에서는 줄이 안 바뀜
@@ -128,6 +128,10 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
   const { data: occurrences, reload: reloadOccurrences } = useLoad(() => listOccurrences(a.id));
   const [showAllOccurrences, setShowAllOccurrences] = useState(false);
   const { busy, run } = useAction();
+  const accent = useAccent(); // 알람 시각 카드 위 흐름 줄의 지금 단계 점
+  const [showFormula, setShowFormula] = useState(false); // 계산식 펼침
+  const [showPrepDetail, setShowPrepDetail] = useState(false); // 준비 시간 자세히
+  const [showIntensity, setShowIntensity] = useState(false); // 알람 강도 바꾸기
   const edit = useScheduleEdit({ appointment: a, reload: () => Promise.all([reload(), reloadOccurrences()]) }); // 연결 일정 카드 → 일정 편집 시트 · 삭제 되돌리기
   const setEdit = (patch: Partial<AlarmEdits>) => setEdits((e) => ({ ...e, ...patch }));
 
@@ -190,6 +194,14 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
   ];
   // 준비 시간 아래 보조 한 줄 — 예측값 · 최근 기록 (용어집: "내 기록 예측 N분 · 최근 N분")
   const prepareHelper = [`내 기록 예측 ${a.auto.predictedPrepMinutes}분`, view.prepareRecent?.length ? `최근 ${Math.round(view.prepareRecent[0])}분` : null].filter(Boolean).join(' · ');
+  // 흐름 줄 — 기상 → 준비 → 출발 → 일정 (없는 알람은 뺌)
+  const flow = [
+    ...view.alarms.filter((x) => x.kind !== 'ARRIVE').map((x) => ({ label: KIND_LABEL[x.kind], time: formatTime(x.at) })),
+    { label: '일정', time: formatTime(a.at) },
+  ];
+  // 알람 강도 한 줄 요약 — 중 · 기본 소리 · 일정 안내형 · 짧게 반복
+  const lvOf = (axis: IntensityAxis): Level => levels[axis] ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto);
+  const summary = `${LEVELS[levels.sound ?? a.intensity.auto].name} · ${LEVELS[lvOf('sound')].sound} · ${LEVELS[lvOf('voice')].voice} · ${LEVELS[lvOf('vibration')].vibration}`;
   const picking = pickKind ? view.alarms.find((x) => x.kind === pickKind) : undefined;
   // 기상이 없던 일정에서 기상을 새로 켜는 중 — 시각을 고르면 이 기상만 따로 만들어짐(#624). 미리 보기가 돌아와 기상 줄이 생겨도 이 시트가 열려 있는 동안은 같은 동작
   const pickingNewWake = pickKind === 'WAKE' && !a.alarms.some((x) => x.kind === 'WAKE');
@@ -430,13 +442,37 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
           <Text variant="label" tone="sub" style={styles.label}>
             알람 시각
           </Text>
-          {/* 계산식은 항목 안에서 줄이 안 끊기게(붙임 공백) 단위(분)까지. 설명 줄은 상자 밖 보조 글 (B-09) */}
-          <FormulaBox lines={[`${KIND_LABEL[baseKind]}${NB}${formatTime(base)} = 약속${NB}${formatTime(a.at)} − 여유${NB}${edits.bufferMinutes}분 − 이동${NB}${travel}분 − 준비${NB}${prepare}분`]} />
-          {formulaNotes.map((line) => (
-            <Text key={line} variant="caption" tone="faint" style={styles.formulaNote}>
-              {line}
-            </Text>
-          ))}
+          {/* 기상 → 준비 → 출발 → 일정 — 홈 흐름 카드(AlarmCard)와 같은 모양 */}
+          <View style={styles.steps}>
+            {flow.map((st, i) => (
+              <View key={st.label} style={styles.step}>
+                <View style={styles.stepRail}>
+                  <View style={[styles.stepDot, i === 0 && { backgroundColor: accent, borderColor: accent }]} />
+                  {i < flow.length - 1 ? <View style={styles.stepBar} /> : null}
+                </View>
+                <Text variant="label" tone="ink" weight={i === 0 ? 700 : 400}>
+                  {st.time}
+                </Text>
+                <Text variant="caption" tone="sub">
+                  {st.label}
+                </Text>
+              </View>
+            ))}
+          </View>
+          {showFormula ? (
+            <>
+              {/* 계산식은 항목 안에서 줄이 안 끊기게(붙임 공백) 단위(분)까지. 설명 줄은 상자 밖 보조 글 (B-09) */}
+              <FormulaBox lines={[`${KIND_LABEL[baseKind]}${NB}${formatTime(base)} = 약속${NB}${formatTime(a.at)} − 여유${NB}${edits.bufferMinutes}분 − 이동${NB}${travel}분 − 준비${NB}${prepare}분`]} />
+              {formulaNotes.map((line) => (
+                <Text key={line} variant="caption" tone="faint" style={styles.formulaNote}>
+                  {line}
+                </Text>
+              ))}
+            </>
+          ) : null}
+          <View style={styles.reset}>
+            <TextLink label={showFormula ? '접기 ›' : '어떻게 계산했나요 ›'} onPress={() => setShowFormula((v) => !v)} />
+          </View>
           {/* 자동으로 기상이 안 생긴 일정(그날 앞 일정에 기상 · 낮 12시 이후 기상)도 기상 줄은 꺼짐으로 보이고, 켜면 시각을 골라 직접 만듦 (#624) */}
           {missingWake ? (
             <KeyValueRow
@@ -469,23 +505,6 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
               }
             />
           ))}
-          {/* 웹은 폰 알람이 울리지 않아 저장된 알람으로 울림 화면을 미리 봄 — 끄면 다음 알람으로 이어짐 (ringPreview.ts) */}
-          {Platform.OS === 'web' ? (
-            <View style={styles.previewRow}>
-              <Text variant="caption" tone="faint">
-                웹 미리보기
-              </Text>
-              {a.alarms
-                .filter((x) => x.kind !== 'ARRIVE' && x.enabled)
-                .map((x) => (
-                  <TextLink
-                    key={x.kind}
-                    label={`${KIND_LABEL[x.kind]} 울려 보기`}
-                    onPress={() => router.push({ pathname: '/ring', params: { alarm: previewAlarmId(a.id, x.kind as RingKind) } })}
-                  />
-                ))}
-            </View>
-          ) : null}
           {blocked ? (
             <Text variant="caption" tone="warn" style={styles.note} accessibilityLiveRegion="polite">
               {blocked}
@@ -557,10 +576,6 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
               <TextLink label="자동으로" accessibilityLabel="준비 시간 자동으로 되돌리기" onPress={() => setEdit({ prepareMinutes: null })} />
             ) : null}
           </View>
-          {/* 준비 시간이 나뉘어 있을 때만 구성을 보여 줌 — 나뉘지 않으면 위 준비 시간과 같은 값이라 안 보임. 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
-          {beforePrep ? <KeyValueRow label="준비 전 활동" value={`${beforePrep}분`} /> : null}
-          {beforePrep || margin > 0 ? <KeyValueRow label="실제 준비" value={`${realPrep}분`} /> : null}
-          {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
           {a.groupName == null && a.prepareValueSource === 'AUTO' && edits.prepareMinutes == null && !manualAny ? (
             <Button
               label="최신 기본값으로 알람 다시 계산"
@@ -578,6 +593,22 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
             step={1}
             unit="분"
           />
+          {/* 준비 시간이 나뉘어 있을 때만 구성을 보여 줌 — 나뉘지 않으면 위 준비 시간과 같은 값이라 안 보임. 자세히를 눌러야 펴짐 */}
+          {beforePrep || margin > 0 ? (
+            <>
+              {showPrepDetail ? (
+                <View>
+                  {beforePrep ? <KeyValueRow first label="준비 전 활동" value={`${beforePrep}분`} /> : null}
+                  <KeyValueRow first={!beforePrep} label="실제 준비" value={`${realPrep}분`} />
+                  {/* 실데이터는 실제 준비 = 예측 − 준비 전 활동이라 늘 0 → 더한 게 없으면 줄을 안 보임 */}
+                  {margin > 0 ? <KeyValueRow label="넉넉히 더한 시간" value={`+${margin}분`} sub="늦지 않도록 실제 준비에 더했어요" /> : null}
+                </View>
+              ) : null}
+              <View style={styles.reset}>
+                <TextLink label={showPrepDetail ? '접기 ›' : '자세히 ›'} onPress={() => setShowPrepDetail((v) => !v)} />
+              </View>
+            </>
+          ) : null}
         </Card>
 
         <Card>
@@ -590,7 +621,14 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
             {a.intensity.latePoint > 0 ? ` · 최근 4주 늦잠 지각 ${a.intensity.lateCount}번` : ''}
           </Text>
           {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
-          {(ALARM_AXES_PICKER ? AXES : []).map(([axis, name]) => {
+          {/* 기본은 한 줄 요약 — 바꾸기를 눌러야 배경음 · 말소리 · 진동이 펴짐 */}
+          <View style={styles.between}>
+            <Text variant="body" style={styles.summary}>
+              {summary}
+            </Text>
+            {ALARM_AXES_PICKER ? <TextLink label={showIntensity ? '접기 ›' : '바꾸기 ›'} onPress={() => setShowIntensity((v) => !v)} /> : null}
+          </View>
+          {(ALARM_AXES_PICKER && showIntensity ? AXES : []).map(([axis, name]) => {
             const picked = levels[axis];
             const level = picked ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto); // 말소리 자동 = 설정의 기본 말소리
             return (
@@ -632,17 +670,13 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
               </View>
             );
           })}
-          {ALARM_AXES_PICKER ? (
-            <Text variant="caption" tone="faint" style={styles.note}>
-              직접 고른 항목은 자동 계산보다 항상 먼저 적용돼요.
-            </Text>
-          ) : null}
-          {ALARM_AXES_PICKER && anyManual ? (
+          {ALARM_AXES_PICKER && showIntensity && anyManual ? (
             <View style={styles.reset}>
               <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
             </View>
           ) : null}
         </Card>
+
         </>
       ) : (
         <Card>
@@ -790,6 +824,12 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
 }
 
 const styles = StyleSheet.create({
+  steps: { flexDirection: 'row', marginTop: 4, marginBottom: 8 },
+  step: { flex: 1, gap: 1 },
+  stepRail: { flexDirection: 'row', alignItems: 'center', height: 14, marginBottom: 4 },
+  stepDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.faint, backgroundColor: colors.card },
+  stepBar: { flex: 1, height: 1.5, backgroundColor: colors.line, marginHorizontal: 4 },
+  summary: { flex: 1 },
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   label: { marginBottom: 8 },
@@ -797,7 +837,6 @@ const styles = StyleSheet.create({
   tail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sub: { marginTop: 4 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  previewRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 10 },
   axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12 },
   axisName: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, gap: 6 },
   manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, overflow: 'hidden' },

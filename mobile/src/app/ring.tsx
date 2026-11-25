@@ -17,6 +17,10 @@ import { ringExit, type RingExit } from '@/features/alarm/ringExit';
 import { isPreviewAlarmId } from '@/features/alarm/ringPreview';
 import { snoozeView } from '@/features/alarm/snooze';
 import type { Appointment, RingInfo, RingKind } from '@/features/alarm/types';
+import { useSky } from '@/features/sky/hooks/useSky';
+import { mixHex, skyAccent, skyTop } from '@/features/sky/sky';
+import { getGroupSummary, listGroups } from '@/features/social/api';
+import { groupWakeLine } from '@/features/social/wakeTexts';
 import { isDevAlarmId } from '@/lib/alarmSync/devAlarm';
 import { formatTime, timeParts } from '@/lib/format';
 import { isMock } from '@/lib/mode';
@@ -29,7 +33,6 @@ import {
   canSnooze,
   SNOOZE_LATE_CHIP,
   SNOOZE_MINUTES_OPTIONS,
-  snoozeButtonLabel,
   snoozeCountLabel,
   snoozeLateLine,
   snoozeLimitNotice,
@@ -41,11 +44,20 @@ const HEAD: Record<RingKind, string> = {
   PREPARE: '준비할 시간이에요',
   DEPARTURE: '출발할 시간이에요',
 };
-const BACKGROUND: Record<RingKind, string> = {
-  WAKE: colors.ringWake,
-  PREPARE: colors.ringPrepare,
-  DEPARTURE: colors.ringDepart,
-};
+// 바탕 = 어두운 잉크에 그 시각 하늘의 포인트 색을 섞음 — 하늘 계열이지만 흰 글자 대비 8 : 1 이상 (하늘 20종 x 3단계 모두 확인)
+//   종류 구분은 섞는 양(밝기)으로: 기상이 가장 어둡고 출발이 가장 밝음
+const SKY_MIX: Record<RingKind, number> = { WAKE: 0.45, PREPARE: 0.55, DEPARTURE: 0.65 };
+const WARN_TEXT_MIX = 0.6; // 경고색에 흰색을 섞어 어두운 바탕 위에서도 글자로 읽히게 (대비 4.5 : 1 이상)
+
+// 같이 준비하는 사람 한 줄 — 일정에는 그룹 이름만 있어 이름으로 그룹을 찾음. 못 읽으면 null (줄을 안 그림)
+async function loadTogether(groupName: string | null): Promise<string | null> {
+  if (!groupName) return null;
+  const group = (await listGroups(null)).find((g) => g.name === groupName);
+  const summary = group ? await getGroupSummary(group.id, null) : null;
+  if (!summary) return null;
+  const line = groupWakeLine(summary.wokeCount, summary.trip);
+  return line ? `${summary.name} · ${line}` : summary.name;
+}
 
 // H07 알람 울림 — 실데이터에서는 알람이 울릴 때 알람 코어의 길잡이 화면이 이 화면(/ring?alarm=<알람 id>)을 잠금화면 위로 불러 옴 (#332)
 //   소리 · 진동 · 다시 울림은 코어가 하고, 이 화면은 값을 코어에서 읽어(getRing) 그리고 해제 · 미루기를 코어에 시킴. 데이터가 뜨면 ackRing으로 "H07 떴음"을 알림
@@ -67,7 +79,23 @@ export default function RingScreen() {
   // 읽는 동안에도 맞는 배경이 보이게 알람 id(<일정>:<종류>)의 종류를 먼저 씀
   const fromId = params.alarm?.split(':')[1];
   const kind: RingKind = data?.kind ?? (fromId && Object.keys(HEAD).includes(fromId) ? (fromId as RingKind) : 'WAKE');
-  const [minutes, setMinutes] = useState<number>(SNOOZE_MINUTES_OPTIONS[0]);
+  const sky = useSky();
+  const bg = mixHex(colors.ink, skyAccent(skyTop(sky.kind, sky.phase)), SKY_MIX[kind]);
+  const warnText = mixHex(colors.warn, colors.inverse, WARN_TEXT_MIX);
+  const groupName = data?.appointment.groupName ?? null;
+  // 읽은 줄은 어느 그룹 것인지와 같이 둠 — 알람이 바뀌면 앞 그룹 줄이 남지 않게
+  const [togetherRead, setTogetherRead] = useState<{ group: string | null; line: string | null } | null>(null);
+  const together = togetherRead?.group === groupName ? togetherRead.line : null;
+  useEffect(() => {
+    let alive = true;
+    loadTogether(groupName).then(
+      (line) => alive && setTogetherRead({ group: groupName, line }),
+      () => undefined, // 덧붙임 줄이라 못 읽어도 화면은 그대로
+    );
+    return () => {
+      alive = false;
+    };
+  }, [groupName]);
   const [done, setDone] = useState(false); // 준비 · 출발 알람을 끈 뒤 — 안내를 화면에 남김
   const handled = useRef(false); // 두 번 눌러도 해제 · 미루기는 한 번만 기록
   const [finished, setFinished] = useState(false); // 해제 · 미루기를 마침 — 뒤로 가기를 다시 풂 (이동이 막혀도 화면에 갇히지 않게)
@@ -128,8 +156,10 @@ export default function RingScreen() {
   const snoozeAllowed = data != null && canSnooze(data.snoozeCount, data.snoozeLimit);
   const view = data ? snoozeView(data) : null;
   const departClock = data?.departAt ? timeParts(data.departAt).hm : null; // "9:00"
-  const selectedLate = view?.chips.find((chip) => chip.minutes === minutes)?.lateMinutes ?? 0;
-  async function snooze() {
+  // 경고 한 줄 — 가장 짧은 미루기가 늦을 때만 ("5분 미루면 9:00 출발보다 5분 늦어요")
+  const firstChip = view?.chips[0];
+  const lateLine = firstChip && firstChip.lateMinutes > 0 && departClock ? snoozeLateLine(firstChip.minutes, departClock, firstChip.lateMinutes) : null;
+  async function snooze(minutes: number) {
     if (!data || handled.current || !canSnooze(data.snoozeCount, data.snoozeLimit)) return;
     handled.current = true;
     if (preview) {
@@ -182,10 +212,10 @@ export default function RingScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: BACKGROUND[kind] }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: bg }]} edges={['top', 'bottom']}>
       <StatusBar style="light" />
       {data && done && data.kind !== 'WAKE' ? (
-        <DonePanel kind={data.kind} appointment={data.appointment} next={preview ? data.alarmId : null} onClose={() => leaveRing(exitFor('done', data.kind))} />
+        <DonePanel bg={bg} kind={data.kind} appointment={data.appointment} next={preview ? data.alarmId : null} onClose={() => leaveRing(exitFor('done', data.kind))} />
       ) : data ? (
         <View style={styles.body} accessibilityRole="alert" accessibilityLabel={data.notice ?? HEAD[kind]}>
           <View style={styles.top}>
@@ -209,7 +239,7 @@ export default function RingScreen() {
           </Text>
           {view?.wakeNow && departClock ? (
             <View style={styles.warnStrip} accessibilityRole="alert">
-              <Text variant="bodyStrong" tone="inverse" align="center">
+              <Text variant="bodyStrong" align="center" style={{ color: warnText }}>
                 {wakeNowBanner(departClock)}
               </Text>
             </View>
@@ -223,6 +253,11 @@ export default function RingScreen() {
           {data.appointment.place ? (
             <Text variant="small" tone="inverse" align="center" style={styles.faded65}>
               {formatTime(data.appointment.at)} · {data.appointment.place}
+            </Text>
+          ) : null}
+          {together ? (
+            <Text variant="caption" tone="inverse" align="center" style={styles.together}>
+              {together}
             </Text>
           ) : null}
 
@@ -240,41 +275,39 @@ export default function RingScreen() {
           ) : null}
 
           <View style={styles.bottom}>
-            <View style={styles.optionsHead}>
-              <Text variant="label" tone="inverse" style={styles.faded70}>
-                미루기 시간
-              </Text>
-              <Text variant="label" tone="inverse" style={styles.faded70}>
-                {snoozeCountLabel(data.snoozeCount, data.snoozeLimit)}
-              </Text>
-            </View>
             {snoozeAllowed ? null : (
               <Text variant="bodyStrong" tone="inverse" style={styles.limitNotice}>
                 {snoozeLimitNotice(data.departAt ? formatTime(data.departAt) : null)}
               </Text>
             )}
-            <View style={styles.options} accessibilityRole="radiogroup" accessibilityLabel="미루기 시간">
+            {/* 미루기 한 겹 — 칩을 누르면 그 시간만큼 바로 미룸. 늦는 칩은 칩 안 작은 글자로만 표시 */}
+            <View style={styles.optionsHead}>
+              <Text variant="label" tone="inverse" style={styles.faded70}>
+                미루기
+              </Text>
+              <Text variant="caption" tone="inverse" style={styles.faded70}>
+                {snoozeCountLabel(data.snoozeCount, data.snoozeLimit)}
+              </Text>
+            </View>
+            <View style={styles.options}>
               {SNOOZE_MINUTES_OPTIONS.map((m) => {
-                const on = m === minutes;
-                // 울리는 시각 기준으로 다시 울릴 시각이 출발 시각을 넘으면 늦음 (네이티브는 지금 시각 기준)
                 const late = (view?.chips.find((chip) => chip.minutes === m)?.lateMinutes ?? 0) > 0;
-                const textColor = late ? (on ? colors.danger : colors.inverse) : on ? colors.ringWake : colors.inverse;
                 return (
                   <Pressable
                     key={m}
-                    onPress={() => setMinutes(m)}
+                    onPress={() => void snooze(m)}
                     disabled={!snoozeAllowed}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: on, disabled: !snoozeAllowed }}
-                    accessibilityHint={late ? SNOOZE_LATE_CHIP : undefined}
-                    style={[styles.option, late ? (on ? styles.optionLateOn : styles.optionLate) : on && styles.optionOn, !snoozeAllowed && styles.disabled]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${m}분 미루기${late ? ` · ${SNOOZE_LATE_CHIP}` : ''}`}
+                    accessibilityState={{ disabled: !snoozeAllowed }}
+                    style={[styles.option, !snoozeAllowed && styles.disabled]}
                   >
-                    <Text variant="body" weight={on || late ? 600 : 400} style={{ color: textColor }}>
+                    <Text variant="body" tone="inverse" weight={600}>
                       {m}분
                     </Text>
                     {/* 칩 안 '늦어요'는 폰 알람 화면(네이티브 AlarmRingingActivity)과 같게 둠 — 글자만 12로 (C-05) */}
                     {late ? (
-                      <Text variant="label" weight={700} style={{ color: textColor }}>
+                      <Text variant="label" weight={700} tone="inverse" style={styles.faded70}>
                         {SNOOZE_LATE_CHIP}
                       </Text>
                     ) : null}
@@ -282,32 +315,16 @@ export default function RingScreen() {
                 );
               })}
             </View>
-            {selectedLate > 0 && departClock ? (
-              <View style={styles.warnLine} accessibilityRole="alert">
-                <Text variant="bodyStrong" tone="inverse" align="center">
-                  {snoozeLateLine(minutes, departClock, selectedLate)}
-                </Text>
-              </View>
+            {lateLine ? (
+              <Text variant="bodyStrong" align="center" style={[styles.warnLine, { color: warnText }]} accessibilityRole="alert">
+                {lateLine}
+              </Text>
             ) : null}
-            <View style={styles.buttons}>
-              <Pressable
-                onPress={snooze}
-                disabled={!snoozeAllowed}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !snoozeAllowed }}
-                style={[styles.button, styles.snooze, selectedLate > 0 && styles.snoozeLate, !snoozeAllowed && styles.disabled]}
-              >
-                <Text variant="button" tone="inverse">
-                  {snoozeButtonLabel(minutes, selectedLate > 0)}
-                </Text>
-              </Pressable>
-              <Pressable onPress={dismiss} accessibilityRole="button" style={[styles.button, styles.main]}>
-                {/* 목업 .rbtn.main 글자색은 종류와 상관없이 #141414 */}
-                <Text variant="button" style={{ color: colors.ringWake }}>
-                  알람 해제
-                </Text>
-              </Pressable>
-            </View>
+            <Pressable onPress={dismiss} accessibilityRole="button" style={[styles.button, styles.main]}>
+              <Text variant="button" style={{ color: bg }}>
+                알람 해제
+              </Text>
+            </Pressable>
           </View>
         </View>
       ) : data === null || (data === undefined && error) ? (
@@ -317,7 +334,7 @@ export default function RingScreen() {
             울릴 알람을 찾을 수 없어요
           </Text>
           <Pressable onPress={() => leaveRing(exitFor('done', kind))} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
-            <Text variant="button" style={{ color: BACKGROUND[kind] }}>
+            <Text variant="button" style={{ color: bg }}>
               닫기
             </Text>
           </Pressable>
@@ -344,7 +361,7 @@ function leaveRing(exit: RingExit, wakeAlarmId?: string) {
 
 // 준비 · 출발 알람을 끈 뒤 안내 — 준비물 체크(준비) · 이동 시간과 도착 목표(출발), "확인"을 누르면 홈
 // next = 웹 미리보기에서 이어 볼 알람의 기준(지금 끈 알람 id) — 있으면 [다음 알람 울려 보기]
-function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null; onClose: () => void }) {
+function DonePanel({ bg, kind, appointment: a, next: from, onClose }: { bg: string; kind: Exclude<RingKind, 'WAKE'>; appointment: Appointment; next: string | null; onClose: () => void }) {
   const [checked, setChecked] = useState<string[]>([]);
   const next = useNextRing(from);
   // 홈 '오늘 준비물'과 같은 할 일(todos)을 씀 — 여기서 체크하면 홈에도 체크됨. 못 읽거나 비었으면 일정에 적은 준비물 이름으로
@@ -400,7 +417,7 @@ function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclud
                   >
                     <View style={[styles.checkBox, on && styles.checkBoxOn]}>
                       {on ? (
-                        <Text variant="label" style={{ color: colors.ringWake }}>
+                        <Text variant="label" style={{ color: bg }}>
                           ✓
                         </Text>
                       ) : null}
@@ -435,13 +452,13 @@ function DonePanel({ kind, appointment: a, next: from, onClose }: { kind: Exclud
       <View style={styles.bottom}>
         {next ? (
           <Pressable onPress={next.open} accessibilityRole="button" style={[styles.button, styles.closeButton, styles.nextButton]}>
-            <Text variant="button" style={{ color: colors.ringWake }}>
+            <Text variant="button" style={{ color: bg }}>
               {next.label}
             </Text>
           </Pressable>
         ) : null}
         <Pressable onPress={onClose} accessibilityRole="button" style={[styles.button, styles.closeButton]}>
-          <Text variant="button" style={{ color: colors.ringWake }}>
+          <Text variant="button" style={{ color: bg }}>
             확인
           </Text>
         </Pressable>
@@ -473,29 +490,22 @@ const styles = StyleSheet.create({
   bottom: { marginTop: 'auto' },
   optionsHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   limitNotice: { marginTop: 8 },
-  options: { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginTop: 8, marginBottom: 16 },
-  warnStrip: { marginTop: 14, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: colors.danger },
-  warnLine: { marginBottom: 12, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.danger },
+  options: { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginTop: 8, marginBottom: 14 },
+  warnStrip: { marginTop: 14, paddingVertical: 6 },
+  warnLine: { marginBottom: 12 },
+  together: { marginTop: 6, opacity: 0.75 },
   disabled: { opacity: 0.35 },
   option: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     paddingVertical: 4,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderRadius: 14, // 알약이 아니라 모서리 둥근 네모
     backgroundColor: colors.ringOption,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  optionOn: { backgroundColor: colors.inverse },
-  optionLate: { backgroundColor: colors.danger }, // 늦게 되는 칩 — 경고 바탕
-  optionLateOn: { backgroundColor: colors.inverse, borderColor: colors.warn }, // 고른 늦는 칩 — 흰 바탕 + 경고 테두리
-  buttons: { flexDirection: 'row', gap: 10 },
-  button: { height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  snooze: { flex: 1, backgroundColor: colors.ringButton, borderWidth: 2, borderColor: 'transparent' },
-  snoozeLate: { borderColor: colors.warn }, // 늦는 분을 골랐을 때 경고 테두리 (눌림 — 막지 않음)
-  main: { flex: 1.3, backgroundColor: colors.inverse },
+  button: { height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  main: { backgroundColor: colors.inverse },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
   checkBox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.ringLine, alignItems: 'center', justifyContent: 'center' },
   checkBoxOn: { backgroundColor: colors.inverse, borderColor: colors.inverse },
