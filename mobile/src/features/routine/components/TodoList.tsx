@@ -26,7 +26,7 @@ export function TodoList({ todos, onToggle }: { todos: Todo[]; onToggle: (id: st
           accessibilityState={{ checked: todo.done }}
           style={[styles.row, i > 0 && styles.divider]}
         >
-          <View style={[styles.box, todo.done && [styles.boxOn, { backgroundColor: accent }]]}>
+          <View style={[styles.box, todo.done && [styles.boxOn, { backgroundColor: accent, borderColor: accent }]]}>
             {todo.done ? (
               <Text variant="label" tone="inverse">
                 ✓

@@ -45,7 +45,7 @@ import { useSky } from '@/features/sky/hooks/useSky';
 import { dayPartOfPhase, skyGreeting, type DayPart } from '@/features/sky/sky';
 import { groupWakeLine } from '@/features/social/wakeTexts';
 import { now } from '@/lib/clock';
-import { addDays, dayKey, formatDate, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
+import { addDays, dayKey, formatDate, isSameDay, formatMinuteOfDay, formatRelative, formatTime, minuteOfDay, startOfDay } from '@/lib/format';
 import { canUseRealData, isMock } from '@/lib/mode';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
@@ -72,17 +72,18 @@ async function loadHome() {
   // 자동 판정으로 확정한 기상 — 확정 뒤 60분 안 [아니에요] 카드 (D61 1탭 정정). 위 getWakeInProgress가 읽으면서 확정하므로 그 뒤에 읽음. 덧붙임 카드라 못 읽어도 홈은 그대로
   const autoWake = await getAutoWake().catch(() => null);
   // 다음 알람이 그룹 약속이면 흐름 카드 아래 "같이 준비하는 사람" 줄 — 덧붙임 줄이라 못 읽어도 홈은 그대로
-  const together = await loadTogether(next?.appointment.groupName ?? null).catch(() => null);
+  const together = await loadTogether(next?.appointment.groupName ?? null, next != null && isSameDay(next.appointment.at, today)).catch(() => null);
   return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together };
 }
 
-// 같이 준비하는 그룹 줄 — 멤버 이름 앞 글자(나는 빼고)와 오늘 기상 수. 일정에는 그룹 이름만 있어 이름으로 찾음
-async function loadTogether(groupName: string | null) {
+// 같이 준비하는 그룹 줄 — 멤버 이름 앞 글자(나 포함)와 오늘 기상 수. 일정에는 그룹 이름만 있어 이름으로 찾음
+//   기상 수는 오늘 것이라, 다음 알람이 오늘 약속이 아니면(저녁의 내일 약속) 그룹 이름만 보임
+async function loadTogether(groupName: string | null, today: boolean) {
   if (!groupName) return null;
   const group = (await listGroups(null)).find((g) => g.name === groupName);
   const summary = group ? await getGroupSummary(group.id, null) : null;
   if (!summary) return null;
-  const line = groupWakeLine(summary.wokeCount, summary.trip);
+  const line = today ? groupWakeLine(summary.wokeCount, summary.trip) : null;
   return { faces: summary.members.map((m) => m.person.initial), line: line ? `${summary.name} · ${line}` : summary.name };
 }
 

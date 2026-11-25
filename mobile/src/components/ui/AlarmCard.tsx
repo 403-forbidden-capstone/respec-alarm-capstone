@@ -23,7 +23,7 @@ type Props = {
   children?: ReactNode; // 카드 아래 덧붙임 (5분 앞당기기 버튼 등)
   // 모양 — full: 날짜 · 큰 시각 · 체인 · 약속 줄 · 작은 글자 (친구가 공유한 알람)
   //        flow: 홈 "다음 알람". 하늘 위 유리 카드에 약속 이름 · 큰 시각 · 흐름 점 줄 · 같이 준비하는 사람 줄
-  //        compact: 알람 목록. 시각 · 체인 · 약속 세 줄만 (나머지는 눌러서 알람 설정에서 봄)
+  //        compact: 알람 목록. 시각 · 체인 · 약속 세 줄 (작은 글자는 부르는 쪽이 넘긴 것만 — 반복 줄)
   variant?: 'full' | 'flow' | 'compact';
   steps?: { label: string; time: string }[]; // flow — 기상 → 준비 → 출발 → 일정
   activeStep?: number; // flow — 다음에 울릴 단계 (포인트 색 점)
@@ -126,7 +126,7 @@ export function AlarmCard({
             </Text>
           ) : null}
         </View>
-        {meta.length && !hero && !compact ? (
+        {meta.length && !hero ? (
           <View style={styles.meta}>
             {meta.map((line) => (
               <Text key={line} variant="caption" tone="faint">

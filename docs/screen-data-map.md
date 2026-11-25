@@ -99,6 +99,8 @@
 ## 화면별 데이터
 
 ### H01 홈
+- 다음 알람은 흐름 카드 — 약속 이름 · 큰 시각 · 기상 → 준비 → 출발 → 일정 점 줄(일정 없는 알람은 '일정' 점 없음). 그룹 약속이면 아래에 같이 준비하는 사람 줄: `listGroups` → 이름이 같은 그룹 → `getGroupSummary`(멤버 앞 글자 · 오늘 기상 수, 약속이 오늘이 아니면 그룹 이름만). 덧붙임 줄이라 못 읽으면 안 그림
+- 나의 기록은 접힌 요약(이번 주 `getWeek`: 날짜 줄 · 평균 기상 · 목표 기상률 · AI 코칭) 한 카드, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간(R02)
 - 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL(#160) → 제목 "알람"
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
 - **아침 카드** (기상 알람 시각 ~ 출발 + 30분, 이슈 #230): `getMorningPlan()` — 오늘(저녁엔 내일) 첫 일정 = 켜진 기상 알람이 붙은 가장 이른 약속(서버 `calc/wake.ts` `hasEarlierWake`와 같은 기준). 하루 일정과 **같은 읽기**(`realRows loadDayRows`, 동시에 부르면 쿼리 한 번)에서 약속 · 알람(준비 · 출발 · 도착 목표 시각, 꺼진 알람은 빈 값) · `est_travel_minutes` · `travel_source` · `departed_at`을 읽고, 기상 확인은 그 기상 알람의 `alarm_events` `WAKE_CONFIRMED` — DB. 가짜 모드는 `db.wakeConfirmations` · `db.me.departAt`
@@ -112,6 +114,7 @@
 - 오늘 루틴은 알람 단계가 하나라도 있는 루틴만 보임 (확인을 달 알람이 없으면 홈에서 끝낼 수 없음). 마지막 알람 단계까지 확인하면 뒤의 알람 없는 단계도 끝난 것("오늘 루틴을 모두 마쳤어요")
 
 ### H02 알람 목록
+- 카드는 세 줄(시각 · 기상/준비/출발 · 일정)이고 작은 글자는 반복 줄(다음 회차 · 반복 요일 · 2주치 걸림)만 — 알람 강도 · 준비 시간은 카드를 눌러 H03에서 봄. 위 줄 오른쪽 "+" 하나 → 시트에서 새 알람 · 새 일정을 고름
 - 날짜별 알람: `alarms` + `appointment_participants` + `appointments` — DB
 - 카드의 켜기 · 끄기(일정 전체): `alarms.is_enabled` — DB → 예약 취소 · 다시 예약 — 폰
 - 일정 없는 알람(D46, 화면 이름 "기본 알람"): 반복은 `alarms.recurrence_rule`(#160), 만들기는 `alarm-commit` — 입력은 알람 탭 위 줄 "+ 새 알람" 시트(시간 · 반복, #588), 고치기 화면은 아직 없음

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { calls, onCall, resetFake } from '@/features/records/testing/fakeSupabase';
 
-import { getMyProfile } from '@/features/profile/api';
-import { inspectMyUpcomingAlarms, inspectPurePrepDb } from '../purePrepDiagnostics';
-
 jest.mock('@/lib/supabase', () => ({
   supabase: jest.requireActual<typeof import('@/features/records/testing/fakeSupabase')>(
     '@/features/records/testing/fakeSupabase').fakeClient,
 }));
+
+import { getMyProfile } from '@/features/profile/api';
+import { inspectMyUpcomingAlarms, inspectPurePrepDb } from '../purePrepDiagnostics';
 
 beforeEach(resetFake);
 

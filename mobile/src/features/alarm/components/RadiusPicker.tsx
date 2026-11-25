@@ -39,7 +39,7 @@ export function RadiusPicker({ value, presets, hint, onChange }: Props) {
               accessibilityRole="radio"
               accessibilityLabel={name ? `${name} ${meters}미터` : `${meters}미터`}
               accessibilityState={{ checked: on }}
-              style={({ pressed }) => [styles.cell, on && [styles.cellOn, { backgroundColor: accent }], pressed && styles.pressed]}
+              style={({ pressed }) => [styles.cell, on && [styles.cellOn, { backgroundColor: accent, borderColor: accent }], pressed && styles.pressed]}
             >
               {name ? (
                 <Text variant="label" tone={on ? 'inverse' : 'ink'}>

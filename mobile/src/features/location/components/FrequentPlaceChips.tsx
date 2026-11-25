@@ -30,7 +30,7 @@ export function FrequentPlaceChips({ places, onPick, selectedLabel }: Props) {
             accessibilityLabel={`${place.label}로 정하기`}
             accessibilityState={{ selected: on }}
             hitSlop={{ top: 8, bottom: 8 }}
-            style={({ pressed }) => [styles.chip, on && [styles.chipOn, { backgroundColor: accent }], pressed && styles.pressed]}
+            style={({ pressed }) => [styles.chip, on && [styles.chipOn, { backgroundColor: accent, borderColor: accent }], pressed && styles.pressed]}
           >
             <Text variant="label" tone={on ? 'inverse' : 'ink'} numberOfLines={1}>
               {place.label}

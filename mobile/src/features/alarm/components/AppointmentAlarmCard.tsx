@@ -35,15 +35,17 @@ export function AppointmentAlarmCard({ appointment: a, current, onToggle, highli
       time={timeParts(first.at)}
       kindLabel={`${KIND_LABEL[first.kind]}${passed ? ' · 지남' : ''}`}
       chain={list.map((x) => chainLabel(x, current, formatTime(x.at)))}
+      // 알람 목록(compact)은 반복 줄만 — 강도 · 준비 시간은 눌러서 알람 설정에서 봄
       meta={[
-        `알람 강도 · ${LEVELS[a.level].name}`,
-        ...(a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),
+        ...(variant === 'compact' ? [] : [`알람 강도 · ${LEVELS[a.level].name}`]),
+        ...(variant === 'compact' || a.standalone ? [] : [`준비 ${a.predictedPrepMinutes}분 · 이동 ${a.travelMinutes}분 · 여유 ${a.bufferMinutes}분`]),
         ...seriesLines({ nextOccurrence, repeatSummary, ahead }),
       ]}
       foot={a.standalone ? `${a.title} · ${a.repeatLabel} · ${formatTime(a.at)}` : `${a.title} · ${a.place || PLACE_PENDING_LABEL} · ${formatTime(a.at)}`}
       enabled={a.enabled}
       variant={variant}
-      steps={[...list.map((x) => ({ label: KIND_LABEL[x.kind], time: formatTime(x.at) })), { label: '일정', time: formatTime(a.at) }]}
+      // 일정 없는 알람은 at이 알람 시각이라 '일정' 점을 안 붙임
+      steps={[...list.map((x) => ({ label: KIND_LABEL[x.kind], time: formatTime(x.at) })), ...(a.standalone ? [] : [{ label: '일정', time: formatTime(a.at) }])]}
       activeStep={Math.max(0, list.indexOf(first))}
       together={together}
       onToggle={onToggle}

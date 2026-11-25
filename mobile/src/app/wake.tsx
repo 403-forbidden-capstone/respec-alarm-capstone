@@ -323,7 +323,7 @@ function Flow({ phase, how }: { phase: Phase | 'idle'; how: How }) {
               →
             </Text>
           ) : null}
-          <View style={[styles.flowStep, step.mode === 'on' && [styles.flowOn, { backgroundColor: accent }]]}>
+          <View style={[styles.flowStep, step.mode === 'on' && [styles.flowOn, { backgroundColor: accent, borderColor: accent }]]}>
             <Text variant="label" tone={step.mode === 'on' ? 'inverse' : step.mode === 'done' ? 'ink' : 'faint'}>
               {step.label}
             </Text>

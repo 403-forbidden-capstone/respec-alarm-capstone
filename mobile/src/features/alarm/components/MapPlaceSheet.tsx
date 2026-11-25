@@ -304,7 +304,7 @@ function MapPlaceBody({ onPick, search, reverse, locate, center, suggestedNames,
               accessibilityLabel={label}
               accessibilityState={{ selected: on }}
               hitSlop={{ top: 8, bottom: 8 }}
-              style={[styles.nameChip, on && [styles.nameChipOn, { backgroundColor: accent }]]}
+              style={[styles.nameChip, on && [styles.nameChipOn, { backgroundColor: accent, borderColor: accent }]]}
             >
               <Text variant="label" tone={on ? 'inverse' : 'ink'}>
                 {label}
