@@ -11,6 +11,8 @@ from catboost import CatBoostRegressor
 from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from survey_v2_model import InvalidSurveyRequest, OriginalSurveyV2, MODEL_NAME as SURVEY_V2_NAME
+
 MODEL_FILES = {
     "c1_mae": "c1_mae.cbm",
     "w4_mae": "w4_mae.cbm",
@@ -20,6 +22,7 @@ EXPECTED_FEATURES = {
     "w4_mae": ["weekday_code", "평토일구분코드", "휴일종류코드", "previous_day_target_minutes", "연령코드"],
 }
 MODEL_DIR = Path(os.environ.get("CATBOOST_MODEL_DIR", "models/v4_age_only")).expanduser().resolve()
+SURVEY_V2_PATH = Path(os.environ.get("SURVEY_V2_MODEL_PATH", "/app/models/survey_v2/prep_start_ratio_v2.cbm"))
 API_TOKEN = os.environ.get("CATBOOST_API_TOKEN", "")
 if not API_TOKEN:
     raise RuntimeError("CATBOOST_API_TOKEN must be set")
@@ -92,11 +95,23 @@ for key, filename in MODEL_FILES.items():
 
 class PredictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model: Literal["c1_mae", "w4_mae"]
+    model: Literal["c1_mae", "w4_mae", "prep_start_ratio_v2"]
+    baseline_definition: str | None = None
+    history_count: int | None = None
     features: dict[str, Any] = Field(default_factory=dict)
 
 
-app = FastAPI(title="Re:Spec C1/W4 Preparation Predictor", version="0.4.0")
+# The survey model is optional. An absent survey artifact NEVER prevents the
+# existing C1/W4 container from starting or becoming healthy.
+SURVEY_V2: OriginalSurveyV2 | None = None
+SURVEY_V2_LOAD_ERROR: str | None = None
+if SURVEY_V2_PATH.is_file():
+    try:
+        SURVEY_V2 = OriginalSurveyV2(SURVEY_V2_PATH)
+    except Exception as error:
+        SURVEY_V2_LOAD_ERROR = f"{type(error).__name__}: {error}"
+
+app = FastAPI(title="Re:Spec CatBoost Preparation Predictors", version="0.5.0")
 
 
 def authorize(key: str | None) -> None:
@@ -109,7 +124,7 @@ def health(response: Response) -> dict[str, Any]:
     ready = len(MODELS) == 2 and not LOAD_ERRORS
     if not ready:
         response.status_code = 503
-    return {"ok": ready, "loaded_models": list(MODELS)}
+    return {"ok": ready, "loaded_models": list(MODELS) + ([SURVEY_V2_NAME] if SURVEY_V2 else [])}
 
 
 @app.get("/models")
@@ -119,13 +134,21 @@ def models(x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
         "model_dir": str(MODEL_DIR),
         "models": [m.describe() for m in MODELS.values()],
         "missing": [key for key in MODEL_FILES if key not in MODELS and key not in LOAD_ERRORS],
-        "load_errors": LOAD_ERRORS,
+        "load_errors": {**LOAD_ERRORS, **({SURVEY_V2_NAME: SURVEY_V2_LOAD_ERROR} if SURVEY_V2_LOAD_ERROR else {})},
+        "survey_v2_available": SURVEY_V2 is not None,
     }
 
 
 @app.post("/predict")
 def predict(body: PredictRequest, x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
     authorize(x_api_key)
+    if body.model == SURVEY_V2_NAME:
+        if SURVEY_V2 is None:
+            raise HTTPException(503, detail="Survey v2 model not loaded")
+        try:
+            return SURVEY_V2.predict(body.model_dump())
+        except InvalidSurveyRequest as error:
+            raise HTTPException(422, detail=str(error)) from error
     if body.model not in MODELS:
         raise HTTPException(503, detail="Model not loaded")
     raw = MODELS[body.model].predict(body.features)
