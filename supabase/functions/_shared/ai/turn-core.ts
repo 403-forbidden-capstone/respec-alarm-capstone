@@ -1513,30 +1513,40 @@ export function applyFast(state: TurnState, fast: FastExtract, ctx: Context, aft
   // ── 기본 알람 만들기 (alarm_new, T2F.v2-g) ── 일정 · 장소 · 준비 · 출발 없이 정한 시각의 알람 하나씩 ALARM_NEW 카드로 (저장은 앱 createStandaloneAlarm)
   //   T2F가 기본 알람을 알람 변경으로 적은 것(바꾸라는 말 · 일정 이름 없는 일정 없는 기상 시각)과 일정 카드 없는 기상 답도 여기로 —
   //   그날 일정의 기상 알람을 고친 것으로 보지 않음. 기존 알람은 '바꿔 · 변경 …'이라고 말할 때만 고침 (아래 알람 변경)
+  //   한 번 새 알람으로 본 항목은 다음 말("고마워" · "응")에 다시 적혀도 새 알람 — 바꾸라는 말을 새로 해야 기존 알람을 고침
+  const newWakeKey = (c: XAlarm): string => `alarmnew~:${c.date ?? ""}|${c.time ?? ""}`;
   const asNew = (c: XAlarm): boolean =>
-    intent !== null && intent.alarm && !intent.edit && hits === null && c.target === "u0" && c.type === "WAKE" &&
-    c.appointment_ref === null && c.time !== null && c.enabled !== false && !(c.shift ?? 0);
+    c.target === "u0" && c.type === "WAKE" && c.appointment_ref === null && c.time !== null && c.enabled !== false && !(c.shift ?? 0) &&
+    (intent !== null && intent.alarm && !intent.edit && hits === null || s.seen[newWakeKey(c)] !== undefined && intent?.edit !== true);
   const alarmNew = [
     ...(fast.alarm_new ?? []).map((a) => ({ ...a, level: null as number | null })),
     ...extract.alarm_changes.filter(asNew).map((c) => ({ date: c.date ?? "", time: c.time as string, ampm: true, after: 0, save: c.save, level: c.intensity === null ? null : levelOfIntensity(c.intensity) })),
   ];
+  for (const c of extract.alarm_changes) if (asNew(c)) s.seen[newWakeKey(c)] = "1";
   extract.alarm_changes = extract.alarm_changes.filter((c) => !asNew(c));
   if (wakeReply?.choice === "TIME" && openNew === undefined && intent?.alarm === true) alarmNew.push({ date: "", time: wakeReply.time, ampm: true, after: 0, save: "UNCONFIRMED", level: null });
   for (const a of alarmNew) {
     const after = Math.round(a.after);
     // 상대 시각은 이번 말이 청한 것만 — T2F가 앞 말의 "30분 뒤"를 다시 적으면 지금 기준으로 또 셈하게 됨
-    if (after > 0 && (intent === null || !/(뒤|후|있다가|이따)/u.test(intent.text) || !once(`alarmnew+:${afterTurn}|${after}`, "1"))) continue;
+    if (after > 0 && (intent === null || !/(뒤|(?<!오)후|있다가|이따)/u.test(intent.text) || !once(`alarmnew+:${afterTurn}|${after}`, "1"))) continue;
     let at: LocalDateTime | undefined;
     if (after > 0) at = addMinutes(now.date, now.time, after);
     else if (TIME_RE.test(a.time)) {
       // 말한 날짜 · 오전/오후가 먼저. 깨워 · 일어나 · 기상처럼 기상이 분명하면 오전, 그 밖에 오전 · 오후를 말하지 않았으면 두 쪽 중,
       //   날짜를 말하지 않았으면 오늘 · 내일(달력 날짜) 중 지금 뒤 가장 가까운 시각 (지난 시각이면 아래 PAST_TIME)
-      const h = Number(a.time.slice(0, 2));
-      const wakeSaid = intent !== null && TYPE_WORDS.WAKE.test(intent.text);
-      const times = a.ampm || wakeSaid || h >= 12 ? [a.time] : [a.time, `${h + 12}${a.time.slice(2)}`];
-      const days = a.date !== "" ? [a.date] : [now.date, addDays(now.date, 1)];
-      const all = days.flatMap((date) => times.map((time) => ({ date, time })));
-      at = all.filter((x) => minutesBetween(now, x) > 0).sort((x, y) => minutesBetween(now, x) - minutesBetween(now, y))[0] ?? all[0];
+      //   처음 정한 시각을 기억 — 다음 말에 다시 적힌 같은 항목을 그 말 · 그때 시각으로 다시 풀면 다른 시각 카드가 생김
+      const memo = `alarmnew=:${a.date}|${a.time}|${a.ampm}`;
+      const was = s.seen[memo];
+      if (was !== undefined) at = { date: was.slice(0, 10), time: was.slice(11) };
+      else {
+        const h = Number(a.time.slice(0, 2));
+        const wakeSaid = intent !== null && TYPE_WORDS.WAKE.test(intent.text);
+        const times = a.ampm || wakeSaid || h >= 12 ? [a.time] : [a.time, `${h + 12}${a.time.slice(2)}`];
+        const days = a.date !== "" ? [a.date] : [now.date, addDays(now.date, 1)];
+        const all = days.flatMap((date) => times.map((time) => ({ date, time })));
+        at = all.filter((x) => minutesBetween(now, x) > 0).sort((x, y) => minutesBetween(now, x) - minutesBetween(now, y))[0] ?? all[0];
+        if (at !== undefined) s.seen[memo] = `${at.date} ${at.time}`;
+      }
     }
     if (at === undefined) {
       // 시각도 상대 시각도 없음 — 몇 시인지 되물음 (같은 요청에 한 번)

@@ -56,7 +56,7 @@ describe('스키마 7개 — 실험실과 같은 내용인지 지문으로 대�
     'extract-fast.v2': '23cc5e', // 서버 판 (extract-fast.v1 + 준비물 items, T2F.v2-d)
     'extract-fast.v3': 'c6f404', // 서버 판 (extract-fast.v2 + 나가기 전 할 일 pre_tasks · 기상 답 wake_reply, T2F.v2-e)
     'extract-fast.v4': '958771', // 서버 판 (extract-fast.v3 + 알람 상대 변경 분 alarm_changes.shift, T2F.v2-f)
-    'extract-fast.v5': '867712', // 서버 판 (extract-fast.v4 + 기본 알람 만들기 alarm_new, T2F.v2-g)
+    'extract-fast.v5': '07582c', // 서버 판 (extract-fast.v4 + 기본 알람 만들기 alarm_new, T2F.v2-g)
     'extract.v2': 'ca990a', // 서버 판 (실험실 장부에 없음 — extract.v1 + 대화 끝 정리 칸)
   };
 
@@ -81,6 +81,16 @@ describe('스키마 7개 — 실험실과 같은 내용인지 지문으로 대�
   it('모두 검증기가 지원하는 키워드만 씀 (모르는 키워드면 던짐)', () => {
     // 비어 있는 입력이라도 컴파일은 되어야 함 — 던지면 지원 밖 키워드가 있다는 뜻
     for (const [id, s] of Object.entries(SCHEMAS)) assert.doesNotThrow(() => validate(s, {}), id);
+  });
+
+  it('extract-fast.v5 alarm_new: 날짜 · 시각이 있는 항목과 빈 글자 항목이 통과, 형식이 틀리면 실패 (#641 리뷰 — 형식 식 이스케이프)', () => {
+    const s = schemaOf('extract-fast.v5');
+    const base = { appointments: [], alarm_changes: [], fact_feedback: [], prep_adjustment: null, safety_flag: false };
+    const item = (over: Record<string, unknown>) => ({ ...base, alarm_new: [{ date: '', time: '', ampm: true, after: 0, save: 'UNCONFIRMED', ...over }] });
+    assert.deepEqual(validate(s, item({ date: '2026-10-09', time: '07:00' })).errors, []);
+    assert.deepEqual(validate(s, item({ after: 30 })).errors, []);
+    assert.equal(validate(s, item({ time: '7:00' })).valid, false);
+    assert.equal(validate(s, item({ date: '10/09' })).valid, false);
   });
 
   it('돌려주는 객체는 얼어 있음', () => {

@@ -13,8 +13,8 @@ schema.properties.alarm_new = {
   items: {
     type: 'object',
     properties: {
-      date: { type: 'string', pattern: '^(\d{4}-\d{2}-\d{2})?$' },
-      time: { type: 'string', pattern: '^(([01]\d|2[0-3]):[0-5]\d)?$' },
+      date: { type: 'string', pattern: '^(\\d{4}-\\d{2}-\\d{2})?$' },
+      time: { type: 'string', pattern: '^(([01]\\d|2[0-3]):[0-5]\\d)?$' },
       ampm: { type: 'boolean' },
       after: { type: 'integer', minimum: 0, maximum: 2880 },
       save: { enum: ['CONFIRMED', 'DECLINED', 'UNCONFIRMED'] },

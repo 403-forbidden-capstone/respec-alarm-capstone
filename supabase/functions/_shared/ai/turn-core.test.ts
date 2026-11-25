@@ -2546,6 +2546,29 @@ describe("기본 알람 만들기 (alarm_new, T2F.v2-g) — 일정 · 준비 · 
     assert.equal(at(nw({ time: "20:00" }), "오후 8시에 깨워줘"), iso("2026-10-08", "20:00"), "말한 오후가 기상 말보다 먼저");
   });
 
+  it("다음 말에 같은 요청이 다시 적혀도 카드가 더 생기지 않음 — 알람 변경으로 적힌 것 · 처음 정한 시각 (#641 리뷰)", () => {
+    const c = ctx(); // 10/9 기상 08:00
+    const f = fast({ alarm_changes: [alarm({ time: "07:00", save: "UNCONFIRMED" })] });
+    const r1 = applyFast(initTurnState(c), f, c, 1, "내일 7시에 깨워줘");
+    const r2 = applyFast(r1.state, f, c, 2, "고마워");
+    assert.deepEqual(r2.state.cards.map((x) => x.kind), ["ALARM_NEW"], "기존 기상 알람 고침 카드가 따라 생기지 않음");
+    const later = applyFast(r1.state, f, c, 2, "아니 기상 알람을 7시로 바꿔줘");
+    assert.ok(later.state.cards.some((x) => x.kind === "ALARM_EDIT"), "바꾸라는 말을 새로 하면 고침");
+
+    const day = ctx({ now: "2026-10-08T14:00:00+09:00" });
+    const g = fast({ alarm_new: [nw({ time: "07:00", ampm: false })] });
+    const w1 = applyFast(initTurnState(day), g, day, 1, "7시에 깨워줘");
+    const w2 = applyFast(w1.state, g, day, 2, "고마워");
+    assert.deepEqual(w2.state.cards.map((x) => x.edit?.at), [iso("2026-10-09", "07:00")], "오늘 19:00 카드가 새로 생기지 않음");
+  });
+
+  it("'오후'의 '후'는 상대 시각 말이 아님", () => {
+    const c = ctx();
+    const r1 = applyFast(initTurnState(c), fast({ alarm_new: [nw({ after: 30 })] }), c, 1, "30분 뒤에 알람");
+    const r2 = applyFast(r1.state, fast({ alarm_new: [nw({ after: 30 }), nw({ date: "2026-10-09", time: "19:00" })] }), { ...c, session: { ...c.session, now: "2026-10-08T22:40:00+09:00" } }, 2, "내일 오후 7시에도 하나");
+    assert.deepEqual(r2.state.cards.map((x) => x.edit?.at), [iso("2026-10-08", "23:00"), iso("2026-10-09", "19:00")]);
+  });
+
   it("시각이 없으면 되묻고 카드 없음 · 지난 시각은 PAST_TIME · 같은 분 알람이 있으면 겹침 · 거절하면 카드 거둠", () => {
     const c = ctx();
     const ask = applyFast(initTurnState(c), fast({ alarm_new: [nw()] }), c, 1, "알람 하나 맞춰줘");
