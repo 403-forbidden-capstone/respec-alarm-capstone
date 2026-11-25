@@ -5,12 +5,13 @@ import { StyleSheet, View } from 'react-native';
 import { Button, Card, LoadError, Loading, Screen, Text, toast, TopBar } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
 import { checkRoutineStep, getRoutineLiveToken, getTodayRoutine } from '@/features/routine/api';
-import { applyTool, buttonNote, coachLine, currentIndex, markStep, startRun, type RunState, type StepMark } from '@/features/routine/run';
+import { applyTool, buttonNote, coachLine, currentIndex, markStep, startRun, type RunState } from '@/features/routine/run';
 import type { RoutineProgress } from '@/features/routine/types';
 import { useLiveVoice } from '@/features/voice/hooks/useLiveVoice';
 import type { LiveToolCall } from '@/features/voice/live';
 import { isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
+import { useAccent } from '@/lib/skyTone';
 import { useLoad } from '@/lib/useLoad';
 import { colors } from '@/theme';
 
@@ -49,10 +50,9 @@ export default function RoutineRunScreen() {
   return <RoutineRun routine={data} />;
 }
 
-const MARK_ICON: Record<StepMark, string> = { done: '✓', skipped: '–', todo: '○' };
-
 function RoutineRun({ routine }: { routine: RoutineProgress }) {
   const mock = isMock();
+  const accent = useAccent(); // 지금 단계 점 — 포인트 색 (lib/skyTone)
   const [run, setRunState] = useState<RunState>(() => startRun(routine.steps, routine.done));
   const runRef = useRef(run); // Live 도구가 렌더 사이에 와도 지금 상태로 처리
   const setRun = (next: RunState) => {
@@ -103,8 +103,9 @@ function RoutineRun({ routine }: { routine: RoutineProgress }) {
     router.dismissTo('/');
   }
 
+  // 가짜 데이터는 AI 말소리 줄이 곧 안내라 상태 글을 따로 안 둠
   const status = mock
-    ? '가짜 데이터 — 실제로는 AI가 이 말을 소리로 하고, "했어"라고 답하면 넘어가요'
+    ? null
     : live.phase === 'connecting'
       ? 'AI와 연결하는 중…'
       : live.phase === 'live'
@@ -114,7 +115,42 @@ function RoutineRun({ routine }: { routine: RoutineProgress }) {
         : (live.error ?? '음성이 꺼져 있어요 — 버튼으로 진행하거나 음성을 다시 켜 주세요');
 
   return (
-    <Screen>
+    <Screen
+      footer={
+        <View style={styles.footer}>
+          {/* 진행 중 말소리 한 줄 — 가짜 데이터는 지금 단계 문장 */}
+          {line ? (
+            <View style={styles.say} accessibilityLabel={`AI 말소리: ${line}`}>
+              <View style={[styles.sayDot, { backgroundColor: accent }]} />
+              <Text variant="small" tone="ink" style={styles.sayText} numberOfLines={2}>
+                {line}
+              </Text>
+            </View>
+          ) : null}
+          {status ? (
+            <Text variant="small" tone="sub">
+              {status}
+            </Text>
+          ) : null}
+          {run.finished ? (
+            <>
+              <Text variant="bodyLarge" weight={600}>
+                오늘 아침 루틴을 마쳤어요
+              </Text>
+              <Button label="홈으로" onPress={home} />
+            </>
+          ) : (
+            <>
+              <Button label="했어" onPress={() => press('done')} />
+              <View style={styles.links}>
+                <TextLink label="건너뛰기" onPress={() => press('skipped')} />
+                {!mock && live.phase === 'idle' ? <TextLink label="음성 다시 켜기 ›" onPress={() => void live.start()} /> : null}
+              </View>
+            </>
+          )}
+        </View>
+      }
+    >
       <TopBar onBack={backOrHome} screenId="H09" />
       <Text variant="title" style={styles.title}>
         아침 루틴
@@ -123,51 +159,29 @@ function RoutineRun({ routine }: { routine: RoutineProgress }) {
         {routine.title} · {routine.steps.length}단계
       </Text>
 
-      {line ? (
-        <Card style={styles.say}>
-          <Text variant="caption">AI</Text>
-          <Text variant="bodyLarge" style={styles.sayText}>
-            {line}
-          </Text>
-        </Card>
-      ) : null}
-
+      {/* 세로 점 줄 — 지난 단계는 채움, 지금 단계만 포인트 색 */}
       <Card style={styles.steps}>
         {run.steps.map((name, i) => {
           const now = i === index && !run.finished;
+          const mark = run.marks[i];
           return (
-            <View key={`${i}-${name}`} style={styles.step} accessibilityLabel={`${i + 1}단계 ${name}, ${run.marks[i] === 'done' ? '했어요' : run.marks[i] === 'skipped' ? '건너뜀' : now ? '지금' : '아직'}`}>
-              <Text variant="bodyLarge" weight={600} tone={run.marks[i] === 'todo' && !now ? 'faint' : 'ink'} style={styles.icon}>
-                {now ? '●' : MARK_ICON[run.marks[i]]}
-              </Text>
-              <Text variant="bodyLarge" weight={now ? 600 : undefined} tone={run.marks[i] === 'skipped' ? 'faint' : 'ink'}>
+            <View key={`${i}-${name}`} style={styles.step} accessibilityLabel={`${i + 1}단계 ${name}, ${mark === 'done' ? '했어요' : mark === 'skipped' ? '건너뜀' : now ? '지금' : '아직'}`}>
+              <View style={styles.rail}>
+                <View style={[styles.dot, mark !== 'todo' && styles.dotDone, now && { backgroundColor: accent, borderColor: accent }]} />
+                {i < run.steps.length - 1 ? <View style={styles.bar} /> : null}
+              </View>
+              <Text
+                variant="bodyLarge"
+                weight={now ? 700 : undefined}
+                tone={now ? 'ink' : mark === 'skipped' || mark === 'todo' ? 'faint' : 'sub'}
+                style={[styles.stepName, i === run.steps.length - 1 && styles.stepLast]}
+              >
                 {name}
               </Text>
             </View>
           );
         })}
       </Card>
-
-      <Text variant="small" style={styles.status}>
-        {status}
-      </Text>
-
-      <View style={styles.actions}>
-        {run.finished ? (
-          <>
-            <Text variant="bodyLarge" weight={600}>
-              오늘 아침 루틴을 마쳤어요
-            </Text>
-            <Button label="홈으로" onPress={home} />
-          </>
-        ) : (
-          <>
-            <Button label="했어" onPress={() => press('done')} />
-            <Button label="건너뛰기" variant="ghost" onPress={() => press('skipped')} />
-            {!mock && live.phase === 'idle' ? <TextLink label="음성 다시 켜기 ›" onPress={() => void live.start()} /> : null}
-          </>
-        )}
-      </View>
       {live.frame}
     </Screen>
   );
@@ -176,11 +190,18 @@ function RoutineRun({ routine }: { routine: RoutineProgress }) {
 const styles = StyleSheet.create({
   title: { marginTop: 8 },
   sub: { marginTop: 4 },
-  say: { marginTop: 16, gap: 4, borderColor: colors.ink },
-  sayText: { marginTop: 2 },
-  steps: { marginTop: 12, gap: 12 },
-  step: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  icon: { width: 20, textAlign: 'center' },
-  status: { marginTop: 12 },
+  steps: { marginTop: 16 },
+  step: { flexDirection: 'row', gap: 14 },
+  rail: { width: 14, alignItems: 'center' },
+  dot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.faint, backgroundColor: colors.card, marginTop: 6 },
+  dotDone: { backgroundColor: colors.faint },
+  bar: { flex: 1, width: 1.5, backgroundColor: colors.line, marginTop: 4, marginBottom: -2 },
+  stepName: { flex: 1, paddingBottom: 18 },
+  stepLast: { paddingBottom: 0 },
   actions: { marginTop: 16, gap: 8 },
+  footer: { gap: 10 },
+  say: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 28 },
+  sayDot: { width: 8, height: 8, borderRadius: 4 },
+  sayText: { flex: 1 },
+  links: { flexDirection: 'row', justifyContent: 'center', gap: 24 },
 });

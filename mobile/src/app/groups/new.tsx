@@ -62,7 +62,7 @@ export default function NewGroupScreen() {
       <Card>
         <Field first label="그룹 이름" value={name} onChangeText={setName} maxLength={GROUP_NAME_MAX} placeholder="예: 아침 준비 메이트" returnKeyType="done" onSubmitEditing={create} />
       </Card>
-      <Note>알람 조회 · 알람 설정은 구성원이 들어온 뒤 공유 권한 설정에서 정해요. 그룹장은 없고, 멤버 누구나 초대 · 이름 바꾸기를 할 수 있어요.</Note>
+      <Note>그룹장 없이 멤버 누구나 초대 · 이름 바꾸기를 할 수 있어요.</Note>
     </Screen>
   );
 }

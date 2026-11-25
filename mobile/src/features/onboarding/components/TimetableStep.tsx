@@ -30,13 +30,14 @@ type Props = {
   onPickTime: (id: string) => void; // 시각 고르는 시트도 부르는 화면이 엶
   onToggleExisting?: (id: string) => void; // 이미 있는 수업 줄의 "그래도 넣기" · "빼기"
   saving?: boolean; // 저장하는 동안 입력을 막음
+  campusName?: string | null; // 학교를 위에서 한 번 고르는 모드 — 있으면(빈 글자 포함 null도) 줄마다 장소 고르기를 숨김. 줄이 이미 다른 장소를 골랐으면 그 줄만 장소 줄을 보임. undefined면 지금처럼 줄마다 장소
 };
 
 // 0시부터 분 → 오전 9:00 (lib/format 모양)
 const timeLabel = (minutes: number) => formatTime(addMinutes(startOfDay(now()), minutes));
 
 // 수업 시간표 단계 내용(직접 입력) — 줄마다 과목 · 요일 · 시작 시각 · 장소. 저장은 틀의 주된 버튼이 부르는 화면에서 함
-export function TimetableStep({ rows, onChangeRow, onAddRow, onRemoveRow, onPickPlace, onPickTime, onToggleExisting, saving }: Props) {
+export function TimetableStep({ rows, onChangeRow, onAddRow, onRemoveRow, onPickPlace, onPickTime, onToggleExisting, saving, campusName }: Props) {
   return (
     <View pointerEvents={saving ? 'none' : 'auto'} style={saving && styles.saving}>
       {rows.length === 0 ? (
@@ -77,7 +78,9 @@ export function TimetableStep({ rows, onChangeRow, onAddRow, onRemoveRow, onPick
                 placeholder="시각 고르기"
                 onPress={() => onPickTime(row.id)}
               />
-              <PickRow label="장소" value={row.place || null} placeholder="장소 고르기" onPress={() => onPickPlace(row.id)} />
+              {campusName === undefined || (row.place !== '' && row.place !== campusName) ? (
+                <PickRow label="장소" value={row.place || null} placeholder="장소 고르기" onPress={() => onPickPlace(row.id)} />
+              ) : null}
               <View style={styles.foot}>
                 <View style={styles.result} accessibilityLiveRegion="polite">
                   {row.result === 'ok' ? (

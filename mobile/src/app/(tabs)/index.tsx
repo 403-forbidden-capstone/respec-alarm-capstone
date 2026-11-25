@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
-import { useCallback, useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, View, type ScrollView } from 'react-native';
 
 import {
   Button,
@@ -16,7 +16,7 @@ import {
   TopBar,
   TopBarIconButton,
 } from '@/components/ui';
-import { cancelSnooze, getAutoWake, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
+import { cancelSnooze, getAppointment, getAutoWake, getDaySchedule, getEarlyWake, getMorningPlan, getNextAlarm, getSnooze, getWakeInProgress } from '@/features/alarm/api';
 import { AutoWakeCard } from '@/features/alarm/components/AutoWakeCard';
 import { EarlyWakeCard } from '@/features/alarm/components/EarlyWakeCard';
 import { getGroupSummary, listGroups } from '@/features/social/api';
@@ -38,8 +38,9 @@ import { isEvening } from '@/features/alarm/schedule';
 import { KIND_LABEL } from '@/features/alarm/types';
 import { DetectionRows } from '@/features/location/DetectionRows';
 import { bannerLines, bannerSummary, PermissionBanner, useFailedAlarmCount, usePermissions } from '@/features/permissions';
+import { getPendingSuggestion } from '@/features/records/api';
 import { RecordsSection, type Register } from '@/features/records/components/RecordsSection';
-import { advanceRoutine, getEveningRoutine, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
+import { advanceRoutine, getEveningRoutine, getJournal, getTodayRoutine, listTodos, toggleTodo } from '@/features/routine/api';
 import { RoutineCard } from '@/features/routine/components/RoutineCard';
 import { TodoList } from '@/features/routine/components/TodoList';
 import { SkyBackdrop } from '@/features/sky/components/SkyBackdrop';
@@ -51,6 +52,8 @@ import { addDays, dayKey, formatDate, isSameDay, formatMinuteOfDay, formatRelati
 import { canUseRealData, isMock } from '@/lib/mode';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
+import { useAccent } from '@/lib/skyTone';
+import { colors, radius, size } from '@/theme';
 
 // 저녁(오후 6시부터 · 전날 밤)에는 내일 일정 · 내일 준비물, 낮에는 오늘 일정 · 오늘 루틴
 // 제안 카드 · 그룹 기상 카드는 그룹 탭으로 옮겨 홈에서는 안 읽음 (D110)
@@ -75,7 +78,57 @@ async function loadHome() {
   const autoWake = await getAutoWake().catch(() => null);
   // 다음 알람이 그룹 약속이면 흐름 카드 아래 "같이 준비하는 사람" 줄 — 덧붙임 줄이라 못 읽어도 홈은 그대로
   const together = await loadTogether(next?.appointment.groupName ?? null, next != null && isSameDay(next.appointment.at, today)).catch(() => null);
-  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together };
+  const attention = await loadAttention(today).catch(() => null);
+  return { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together, attention };
+}
+
+// 확인할 일 한 줄 (UX K4) — 한 번에 하나, 약속이 바뀜 > 알람 조정 제안 > 오늘 하루 기록 순
+//   약속 변경은 서버에서 읽는 길이 아직 없어 가짜 데이터에서만 보임 (실데이터 연결 남음) — 알림(needsConfirm)을 누르면 같은 화면으로 열림
+type Attention =
+  | { kind: 'changed'; id: string; text: string }
+  | { kind: 'suggestion'; id: string; text: string }
+  | { kind: 'journal'; date: string; text: string }
+  | { kind: 'first'; text: string }; // 온보딩을 끝냈는데 일정이 하나도 없을 때 — 확인할 일이 따로 없으면 이 줄
+
+async function loadAttention(today: Date): Promise<Attention | null> {
+  if (isMock()) {
+    const a = await getAppointment('a1');
+    if (a) return { kind: 'changed', id: a.id, text: `${a.groupName ?? '캡스톤팀'} 약속이 바뀌었어요` };
+  }
+  const suggestion = await getPendingSuggestion();
+  if (suggestion) return { kind: 'suggestion', id: suggestion.id, text: '알람 조정 제안이 있어요' };
+  const date = dayKey(today);
+  if (await getJournal(date)) return { kind: 'journal', date, text: '오늘 하루 기록이 생겼어요' };
+  return null;
+}
+
+const ATTENTION_ACTION = { changed: '알람 확인 ›', suggestion: '보기 ›', journal: '보기 ›', first: '만들기 ›' } as const;
+
+function openAttention(a: Attention, newSchedule: () => void) {
+  if (a.kind === 'first') newSchedule();
+  else if (a.kind === 'changed') router.push({ pathname: '/alarm/changed', params: { id: a.id } });
+  else if (a.kind === 'suggestion') router.push({ pathname: '/suggestion/[id]', params: { id: a.id } });
+  else router.push({ pathname: '/journal/[date]', params: { date: a.date } });
+}
+
+// 인사말 바로 아래 유리 카드 한 줄 — 흐름 카드와 같은 계열
+function AttentionRow({ attention, onNewSchedule }: { attention: Attention; onNewSchedule: () => void }) {
+  const accent = useAccent();
+  return (
+    <Pressable
+      onPress={() => openAttention(attention, onNewSchedule)}
+      accessibilityRole="button"
+      accessibilityLabel={`${attention.text}, ${ATTENTION_ACTION[attention.kind].replace(' ›', '')}`}
+      style={({ pressed }) => [styles.attention, pressed && styles.pressed]}
+    >
+      <Text variant="bodyStrong" style={styles.attentionText} numberOfLines={1}>
+        {attention.text}
+      </Text>
+      <Text variant="rowLabel" weight={700} style={{ color: accent }}>
+        {ATTENTION_ACTION[attention.kind]}
+      </Text>
+    </Pressable>
+  );
 }
 
 // 같이 준비하는 그룹 줄 — 멤버 이름 앞 글자(나 포함)와 오늘 기상 수. 일정에는 그룹 이름만 있어 이름으로 찾음
@@ -99,6 +152,7 @@ function dayPart(t: Date, beforeSunrise: boolean): DayPart {
 // H01 홈 — 다음 알람(오늘 아침 흐름) · 오늘 일정 · 루틴 · 준비물 · 맨 아래 나의 기록(R02 이번 주 요약, "자세히"로 월간 · 주간 · 일간, D110)
 export default function HomeScreen() {
   const { data, error, reload } = useLoad(loadHome);
+  const { preview: previewParam } = useLocalSearchParams<{ preview?: string }>(); // 가짜 데이터 모드에서만: /?preview=first로 일정이 하나도 없는 첫 화면을 바로 봄 (시안 확인용)
   // 당겨서 새로고침 — 홈 내용 + 아래 기록 구역(보이는 월간 · 주간 · 일간)이 맡겨 둔 다시 읽기
   const recordsReload = useRef<(() => Promise<unknown>) | null>(null);
   const registerRecords = useCallback<Register>((r) => {
@@ -113,6 +167,9 @@ export default function HomeScreen() {
   const permissions = usePermissions(); // 홈 빨간 줄 — 알림 · 전체화면 알림이 꺼짐, 폰에 못 건 알람
   const failedAlarms = useFailedAlarmCount();
   const depart = useDepartCheck(data?.morning?.appointmentId); // 아침 카드 [다시 확인]
+  const scrollRef = useRef<ScrollView>(null); // 오른쪽 위 [기록] → 맨 아래 나의 기록으로
+  const recordsY = useRef(0);
+  const [earlyDoneAt, setEarlyDoneAt] = useState<Date | null>(null); // [먼저 깼어요]를 누른 시각 — 그 자리에 기록 한 줄
 
   // 저녁으로 넘어갔거나 다음 알람 시각이 지났으면 내용을 다시 읽음
   const stale = data != null && (isEvening(current) !== data.evening || (data.next != null && data.next.alarm.at.getTime() < current.getTime()));
@@ -129,7 +186,14 @@ export default function HomeScreen() {
       {error ? <LoadError onRetry={reload} /> : <Loading text="홈을 불러오는 중" />}
     </Screen>
   );
-  const { evening, target, next, schedule, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together } = data;
+  const noSchedulePreview = isMock() && previewParam === 'first';
+  const { evening, target, routine, todos, eveningRoutine, snooze, wake, morning, early, autoWake, together } = data;
+  const next = noSchedulePreview ? null : data.next;
+  const schedule = noSchedulePreview ? [] : data.schedule;
+  // 일정(약속)이 하나도 없으면 — 홈이 이미 읽은 다음 알람 · 오늘(내일) 일정으로 판단, 새 호출 없음. 일정을 만들면 저절로 사라짐
+  const firstGuide = next == null && schedule.length === 0;
+  const attention: Attention | null = noSchedulePreview ? null : data.attention;
+  const topLine: Attention | null = attention ?? (firstGuide ? { kind: 'first', text: '첫 일정을 만들어 볼까요?' } : null);
   // 추가한 일정이 홈이 보여 주는 날(낮 = 오늘, 저녁 = 내일)에 들어가게 날짜를 넘김
   const newSchedule = () => router.push({ pathname: '/schedule/new', params: { from: 'home', date: dayKey(target) } });
 
@@ -177,7 +241,7 @@ export default function HomeScreen() {
     <TopBarIconButton icon={{ ios: 'gearshape', android: 'settings', web: 'settings' }} accessibilityLabel="설정" glass onPress={() => router.push('/settings')} />
   ) : null;
   return (
-    <Screen onRefresh={refresh} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
+    <Screen onRefresh={refresh} scrollRef={scrollRef} backdrop={<SkyBackdrop kind={sky.kind} phase={sky.phase} />}>
       <TopBar
         left={
           // 하늘 배경 맨 위라 본문 색 — 보조 색은 대비가 모자람 (features/sky/sky.ts SKY_SUB_TEXT_FROM)
@@ -185,11 +249,25 @@ export default function HomeScreen() {
             {formatDate(current)}
           </Text>
         }
-        right={settingsButton ? <View style={styles.gearCorner}>{settingsButton}</View> : undefined}
+        right={
+          <View style={styles.gearCorner}>
+            {/* [기록] — 홈 맨 아래 나의 기록으로 (UX E-01) */}
+            <TopBarIconButton
+              icon={{ ios: 'calendar', android: 'calendar_month', web: 'calendar_month' }}
+              accessibilityLabel="기록"
+              glass
+              onPress={() => scrollRef.current?.scrollTo({ y: Math.max(0, recordsY.current - 12), animated: true })}
+            />
+            {settingsButton}
+          </View>
+        }
       />
       <Text variant="display" style={styles.title}>
         {skyGreeting(sky.kind, sky.preview ? dayPartOfPhase(sky.phase) : dayPart(current, sky.beforeSunrise))}
       </Text>
+
+      {/* 확인할 일 — 인사 바로 아래, 한 번에 하나 (UX K4) */}
+      {topLine ? <AttentionRow attention={topLine} onNewSchedule={newSchedule} /> : null}
 
       {permissionSummary ? <PermissionBanner text={permissionSummary} onPress={() => router.push('/ring-check')} /> : null}
       {/* 아침 카드 자리 — 인사 바로 아래. 다른 줄(알림 · 제안 등)은 이 위에 끼워 넣음 */}
@@ -255,16 +333,21 @@ export default function HomeScreen() {
       ) : (
         <EmptyState
           title="예정된 알람이 없어요"
-          body="일정을 추가하면 기상 · 준비 · 출발 알람을 계산해 드려요."
-          action={{ label: '새 일정', onPress: newSchedule }}
+          {...(firstGuide ? {} : { body: '일정을 추가하면 기상 · 준비 · 출발 알람을 계산해 드려요.', action: { label: '새 일정', onPress: newSchedule } })}
         />
       )}
 
       {/* 기상 알람 60분 전부터 [먼저 깼어요] 한 줄 — 누르면 줄이 사라지고 그룹 줄의 내 상태가 '일어났어요'로 */}
-      {early ? (
+      {earlyDoneAt ? (
+        // 누른 뒤 같은 자리에 기록 한 줄 (UX C-07) — 되돌리기는 알람 코어 확인 뒤
+        <View style={styles.earlyDone}>
+          <Text variant="small" tone="sub">{`${formatTime(earlyDoneAt)}에 일어났어요`}</Text>
+        </View>
+      ) : early ? (
         <EarlyWakeCard
           early={early}
           onDone={() => {
+            setEarlyDoneAt(now());
             toast('일어났어요로 기록했어요');
             void reload();
           }}
@@ -276,7 +359,6 @@ export default function HomeScreen() {
 
       <SectionHeader title={evening ? '내일 일정' : '오늘 일정'} right={
           <View style={styles.links}>
-            <TextLink label="학교 시간표" onPress={() => router.push('/timetable')} />
             <TextLink label="+ 새 일정" onPress={newSchedule} strong />
           </View>
         } />
@@ -284,16 +366,22 @@ export default function HomeScreen() {
         <ScheduleList items={schedule} />
       </Card>
 
-      {!evening && routine ? (
-        <>
-          <SectionHeader title="오늘 루틴" right={`${routine.done}/${routine.steps.length} 완료`} />
-          <RoutineCard routine={routine} onPress={tickRoutine} onVoice={() => router.push('/routine-run')} />
-        </>
-      ) : null}
-
-      {/* 준비물은 늘 보임 — 비어도 "챙길 준비물이 없어요" (AI 대화에서 말한 준비물이 바로 여기 들어옴) */}
-      <SectionHeader title={evening ? '내일 준비물' : '오늘 준비물'} right={`${todos.filter((x) => x.done).length}/${todos.length}`} />
+      {/* 루틴 · 준비물 — 한 카드 안 두 구역. 준비물은 늘 보임 — 비어도 "챙길 준비물이 없어요" (AI 대화에서 말한 준비물이 바로 여기 들어옴) */}
       <Card>
+        {!evening && routine ? (
+          <>
+            <View style={styles.zoneHead}>
+              <Text variant="section">오늘 루틴</Text>
+              <Text variant="small">{`${routine.done}/${routine.steps.length} 완료`}</Text>
+            </View>
+            <RoutineCard bare routine={routine} onPress={tickRoutine} onVoice={() => router.push('/routine-run')} />
+            <View style={styles.zoneLine} />
+          </>
+        ) : null}
+        <View style={styles.zoneHead}>
+          <Text variant="section">{evening ? '내일 준비물' : '오늘 준비물'}</Text>
+          <Text variant="small">{`${todos.filter((x) => x.done).length}/${todos.length}`}</Text>
+        </View>
         <TodoList todos={todos} onToggle={tickTodo} />
       </Card>
 
@@ -329,7 +417,9 @@ export default function HomeScreen() {
       ) : null}
 
       {/* 나의 기록 (R02) — 기록 탭을 없애고 홈 맨 아래로 (D110) */}
-      <RecordsSection register={registerRecords} />
+      <View onLayout={(e) => (recordsY.current = e.nativeEvent.layout.y)}>
+        <RecordsSection register={registerRecords} />
+      </View>
       {edit.sheet ? <NewAlarmSheet key={edit.id} {...edit.sheet} current={current} /> : null}
     </Screen>
   );
@@ -337,7 +427,26 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   links: { flexDirection: 'row', gap: 14 },
-  gearCorner: { marginRight: -10 }, // 버튼을 화면 여백 쪽으로 조금 밀어 모서리에 붙임
+  gearCorner: { marginRight: -10, flexDirection: 'row', alignItems: 'center' }, // 버튼을 화면 여백 쪽으로 조금 밀어 모서리에 붙임 — 기록 · 설정 두 버튼
+  attention: {
+    minHeight: size.touch,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.glassLine,
+    backgroundColor: colors.glassCard,
+    boxShadow: colors.glassShadow,
+  },
+  attentionText: { flex: 1 },
+  pressed: { opacity: 0.7 },
+  earlyDone: { minHeight: 28, justifyContent: 'center', marginTop: -2, marginBottom: 4, paddingHorizontal: 4 },
+  zoneHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  zoneLine: { height: 1, backgroundColor: colors.line, marginTop: 14, marginBottom: 14 },
   title: { marginTop: 4, marginBottom: 12 }, // 날짜와는 가깝게(한 묶음), 아래 내용과는 띄움
   ctaText: { marginTop: 4 },
   ctaButton: { marginTop: 12 },

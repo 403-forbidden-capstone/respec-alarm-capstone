@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, confirm, EmptyState, Loading, LoadError, Screen, Text, toast, TopBar } from '@/components/ui';
@@ -12,9 +12,11 @@ import { usePhotoImport } from '@/features/onboarding/hooks/usePhotoImport';
 import { setImportBatch } from '@/features/onboarding/importHandoff';
 import { classSeriesOf, seriesLine, type ClassSeries } from '@/features/onboarding/timetableList';
 import { TIMETABLE_PATHS } from '@/lib/flags';
+import { isMock } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { colors } from '@/theme';
 
 // 학교 시간표 — 매주 반복하는 일정을 요일 · 시각 순으로 보고 지움. 사진 · 캘린더로 한 번에 넣는 입구도 여기 (설정에서 옮김, 11/2)
@@ -35,7 +37,9 @@ export default function TimetableScreen() {
     router.push('/timetable-import');
   });
   const canImport = enabled && session != null && (TIMETABLE_PATHS.photo || TIMETABLE_PATHS.calendar);
-  const series = data ? classSeriesOf(data) : [];
+  const { preview } = useLocalSearchParams<{ preview?: string }>(); // 가짜 데이터 모드에서만: /timetable?preview=empty로 수업 없는 화면을 봄 (시안 확인용)
+  const series = data && !(isMock() && preview === 'empty') ? classSeriesOf(data) : [];
+  const empty = data != null && series.length === 0; // 수업이 하나도 없음 — 입구 줄에 [직접 넣기]
   const deletable = series.filter((s) => !s.shared);
 
   // 하나씩 차례로 지움 — 중간에 실패해도 그때까지 지운 것이 목록에 반영되게 끝나면 늘 다시 읽음
@@ -60,7 +64,7 @@ export default function TimetableScreen() {
         매주 반복하는 일정(수업 포함)이에요. 일정마다 알람이 따로 맞춰져요
       </Text>
 
-      {canImport ? (
+      {canImport || empty ? (
         <>
           <ImportEntryCard
             onPhoto={
@@ -75,6 +79,7 @@ export default function TimetableScreen() {
                 : undefined
             }
             onCalendar={TIMETABLE_PATHS.calendar ? calendarImport.start : undefined}
+            onManual={empty ? () => router.push('/schedule/new') : undefined}
             busy={photoImport.reading || calendarImport.busy}
             reading={photoImport.reading ? 'photo' : calendarImport.reading ? 'calendar' : null}
           />
@@ -91,7 +96,7 @@ export default function TimetableScreen() {
 
       {!data && !error ? <Loading text="시간표를 불러오는 중" /> : null}
       {!data && error ? <LoadError onRetry={reload} /> : null}
-      {data && !series.length ? <EmptyState title="반복 일정이 없어요" body="시간표 사진이나 폰 캘린더에서 수업을 한 번에 넣을 수 있어요." /> : null}
+      {data && !series.length ? <EmptyState title="반복 일정이 없어요" /> : null}
       {series.length ? (
         <Card>
           {series.map((s, i) => (
@@ -104,7 +109,7 @@ export default function TimetableScreen() {
                   {seriesLine(s)}
                 </Text>
               </View>
-              <Button variant="ghost" small label="삭제" onPress={() => remove([s], `'${s.title}' 일정을 지울까요?`, s.shared ? SHARED_NOTE : KEEP_NOTE)} disabled={busy} />
+              <TextLink label="···" accessibilityLabel={`${s.title} 지우기`} onPress={() => remove([s], `'${s.title}' 일정을 지울까요?`, s.shared ? SHARED_NOTE : KEEP_NOTE)} disabled={busy} />
             </View>
           ))}
         </Card>

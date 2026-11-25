@@ -173,9 +173,11 @@ function Detail({ suggestion: s, reload }: { suggestion: Suggestion; reload: () 
             {alarmLink ? <View style={[styles.link, styles.linkCenter]}>{alarmLink}</View> : null}
           </Card>
           <View style={styles.stack}>
-            <Button label="제안 적용하기" onPress={() => apply(s.minutes)} disabled={busy} />
-            {change ? null : <Button label="직접 수정하기" variant="ghost" onPress={() => setEditing(s.minutes)} disabled={busy} />}
-            <Button label="이번 제안 무시" variant="plain" onPress={ignore} disabled={busy} />
+            <Button label="적용" onPress={() => apply(s.minutes)} disabled={busy} />
+            <View style={styles.links}>
+              {change ? null : <TextLink label="직접 수정" onPress={() => setEditing(s.minutes)} disabled={busy} />}
+              <TextLink label="무시" onPress={ignore} disabled={busy} />
+            </View>
           </View>
         </>
       ) : null}
@@ -336,6 +338,7 @@ const styles = StyleSheet.create({
   trioItem: { flex: 1 },
   sub: { marginTop: 4 },
   stack: { gap: 10, marginTop: 16 },
+  links: { flexDirection: 'row', justifyContent: 'center', gap: 28 },
   link: { alignSelf: 'flex-start', marginTop: 10 },
   linkCenter: { alignSelf: 'center' },
   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 6 },

@@ -53,9 +53,6 @@ export default function SharedAlarmsScreen() {
       <Text variant="title" style={styles.title}>
         {p.short}님의 알람
       </Text>
-      <Text variant="lead" style={styles.lead}>
-        {p.short}님이 공유한 알람을 확인하고 관리해요.
-      </Text>
 
       <Card style={styles.summary}>
         <Text variant="bodyStrong">
@@ -95,8 +92,7 @@ export default function SharedAlarmsScreen() {
 }
 
 const styles = StyleSheet.create({
-  title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
+  title: { marginTop: 8, marginBottom: 18 },
   summary: { backgroundColor: colors.chip },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
 });

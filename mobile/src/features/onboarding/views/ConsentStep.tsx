@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Card, Text } from '@/components/ui';
-import { colors } from '@/theme';
+import { colors, size } from '@/theme';
 
 import { AGE_CHECK_HINT, AGE_CHECK_LABEL, type ConsentItem } from '../consent';
 import { useAccent } from '@/lib/skyTone';
@@ -14,16 +15,46 @@ type Props = {
 
 // 개인정보 안내 단계 (L02-7) — 항목마다 읽는 것 / 안 읽는 것 / 친구에게 보이는 것. 동의 저장은 부르는 화면이 함
 export function ConsentStep({ items, ageChecked, onAgeChange }: Props) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set()); // 펼친 항목
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
   return (
     <>
-      {items.map((item) => (
-        <Card key={item.key}>
-          <Text variant="bodyStrong">{item.title}</Text>
-          <Line label="읽는 것" text={item.reads} />
-          <Line label="안 읽는 것" text={item.doesNotRead} />
-          <Line label="친구에게 보이는 것" text={item.friends} />
-        </Card>
-      ))}
+      <Text variant="small" tone="sub" style={styles.summary}>
+        {items.length}가지를 읽어요. 눌러서 자세히 볼 수 있어요
+      </Text>
+      <Card style={styles.list}>
+        {items.map((item, i) => {
+          const on = open.has(item.key);
+          return (
+            <View key={item.key} style={i > 0 && styles.divider}>
+              <Pressable
+                onPress={() => toggle(item.key)}
+                accessibilityRole="button"
+                accessibilityLabel={item.title}
+                accessibilityState={{ expanded: on }}
+                style={({ pressed }) => [styles.head, pressed && styles.pressed]}
+              >
+                <Text variant="bodyStrong">{item.title}</Text>
+                <Text variant="bodyStrong" tone="faint">
+                  {on ? '⌃' : '›'}
+                </Text>
+              </Pressable>
+              {on ? (
+                <View style={styles.detail}>
+                  <Line label="읽는 것" text={item.reads} />
+                  <Line label="안 읽는 것" text={item.doesNotRead} />
+                  <Line label="친구에게 보이는 것" text={item.friends} />
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </Card>
       {onAgeChange ? <AgeCheck checked={!!ageChecked} onChange={onAgeChange} /> : null}
     </>
   );
@@ -63,7 +94,13 @@ function Line({ label, text }: { label: string; text: string }) {
 }
 
 const styles = StyleSheet.create({
-  line: { marginTop: 10, gap: 2 },
+  summary: { marginBottom: 10 },
+  list: { paddingVertical: 4 },
+  divider: { borderTopWidth: 1, borderTopColor: colors.line },
+  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: size.touch },
+  pressed: { opacity: 0.6 },
+  detail: { paddingBottom: 14 },
+  line: { marginTop: 8, gap: 2 },
   age: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
   box: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
   boxOn: { backgroundColor: colors.ink },

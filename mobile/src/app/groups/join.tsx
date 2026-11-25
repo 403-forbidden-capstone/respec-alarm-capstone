@@ -109,7 +109,7 @@ export default function JoinGroupScreen() {
           ) : null}
         </Card>
       ) : null}
-      <Note>그룹원의 알람 · 기상 상태는 그 사람이 공유를 허용해야 보여요. 내가 보여 줄 범위는 들어갈 때 · 들어간 뒤 정해요.</Note>
+      <Note>내가 보여 줄 범위는 들어갈 때 정해요.</Note>
     </Screen>
   );
 }

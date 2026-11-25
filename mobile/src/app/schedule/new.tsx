@@ -76,7 +76,7 @@ const wakeNote = (w: EarlierWake) => `같은 날 ${w.title} 기상 알람(${form
 // from=chat: AI 대화(A02)에서 찾은 일정을 "수정"으로 연 것 — 찾은 값으로 채우고, 저장하면 대화로 돌아감
 // from=home · from=alarms: 저장하면 온 화면으로 돌아감 (알람 목록이면 새 일정에 테두리), date=2025-05-22: 처음 날짜 (홈이 보여 주는 날)
 export default function NewScheduleScreen() {
-  const params = useLocalSearchParams<{ from?: string; date?: string }>();
+  const params = useLocalSearchParams<{ from?: string; date?: string; groupId?: string }>();
   const from = params.from;
   // 대화에서 왔고 찾은 일정이 아직 대기일 때만 — 이미 확인한 카드면 보통 새 일정으로 (두 벌 저장 막기)
   const [fromChat] = useState(() => from === 'chat' && foundScheduleDraft() != null);
@@ -92,7 +92,8 @@ export default function NewScheduleScreen() {
     }
     // 지난 날짜가 넘어오면 내일로
     const day = parseDayParam(params.date);
-    return defaultDraft(day && dayKey(day) >= dayKey(now()) ? day : tomorrow(now()));
+    const base = defaultDraft(day && dayKey(day) >= dayKey(now()) ? day : tomorrow(now()));
+    return params.groupId ? { ...base, groupId: params.groupId } : base; // 그룹 상세 [+ 새 공동 약속]이면 그 그룹이 미리 골라진 채 (없는 그룹이면 저장 때 빠짐)
   });
   const [edited, setDraft] = useState(initial);
   // 실데이터는 장소를 골라야(최근 장소 · 검색 시트) 해서 처음 값이 비어 있음 — 아직 안 골랐으면 최근 장소의 첫 곳을 미리 골라 둔 것으로 보여 줌 (처음 값 그대로라 나갈 때 묻지 않음). 가짜 데이터는 처음부터 있음
