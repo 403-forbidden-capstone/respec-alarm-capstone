@@ -3,12 +3,12 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, confirm, KeyValueRow, Screen, SectionHeader, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { listPlaces, reverseAddress } from '@/features/alarm/api';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { homeOf } from '@/features/alarm/placeSheet';
 import type { PickedPlace } from '@/features/alarm/mapPicker';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { DataModeToggle } from '@/features/auth/DataModeToggle';
 import { HOME_RADIUS_M } from '@/features/location/constants';
 import { locateOnce } from '@/features/location/currentPosition';
 import { HOME_RADIUS_PRESETS } from '@/features/location/radius';
@@ -31,7 +31,7 @@ import { TRANSPORT_NAME, WAKE_MARGIN_NAME, WAKE_SENSITIVITY_NAME } from '@/featu
 import type { ProfileFields } from '@/features/profile/types';
 import { userMessage } from '@/lib/errors';
 import { registerPushToken } from '@/lib/push/token';
-import { canUseRealData, modeLocked } from '@/lib/mode';
+import { canUseRealData } from '@/lib/mode';
 import { backOrHome } from '@/lib/nav';
 import { cleanupAfterAccountDelete, signOutAndCleanup } from '@/lib/session';
 import { listBlocks } from '@/features/social/api';
@@ -39,12 +39,29 @@ import { useAction } from '@/lib/useAction';
 import { useLoad } from '@/lib/useLoad';
 import { colors, size } from '@/theme';
 
+// 그 밖 카드의 누르는 줄 — 이름 · (값) · ›
+function LinkRow({ label, value, onPress, first }: { label: string; value?: string; onPress: () => void; first?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.linkRow, !first && styles.linkDivider, pressed && styles.pressed]}
+    >
+      <Text variant="body">{label}</Text>
+      <Text variant="body" tone="sub">
+        {value ? `${value} ›` : '›'}
+      </Text>
+    </Pressable>
+  );
+}
+
 const PROVIDER_NAME: Record<string, string> = { kakao: '카카오', google: 'Google' };
 
 // 열려 있는 편집 시트 — 집은 지도 고르기 시트(placeOpen)가 따로 맡음
 type Editing = 'nickname' | 'handle' | 'sleep' | 'prepare' | 'prepareMlSurvey' | null;
 
-// 설정 — 계정 · 아침 준비 기본값 · 알람 · 로그아웃 · 개발(데이터 모드)
+// 설정 — 계정 · 아침 준비 기본값 · 알람 · 로그아웃
 // 값 줄을 누르면 편집 시트가 열리고 [저장]하면 profiles에 씀 (실데이터 + 로그인일 때만, 가짜 모드는 보기만)
 export default function SettingsScreen() {
   const { session, profile, enabled, refreshProfile } = useAuth();
@@ -161,12 +178,17 @@ export default function SettingsScreen() {
 
       {profile ? (
         <>
-          <SectionHeader title="아침 준비 기본값" />
+          <SectionHeader title="준비 기본값" />
           <Card>
-            <EditRow first label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? "미설정" : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
+            <EditRow first label="순수 외출 준비시간" value={profile.default_outing_prep_minutes == null ? '미설정' : `${profile.default_outing_prep_minutes}분`} onPress={open('prepare')} />
             <EditRow label="여유 시간" value={`${profile.default_buffer_minutes}분`} onPress={open('prepare')} />
             <EditRow label="이동 수단" value={TRANSPORT_NAME[profile.default_transport]} onPress={open('prepare')} />
             <EditRow label="집(출발지)" value={profile.home_name ?? '정하지 않았어요'} onPress={canEdit ? () => setPlaceOpen(true) : undefined} />
+            {/* 연구용 정보는 한 줄로 합침 (이름 · 안내 문구는 main의 #638 문구) */}
+            <EditRow label="준비시간 연구 정보(선택)" value={prepareMlSurveySummary(profile)} onPress={open('prepareMlSurvey')} />
+            <Text variant="small" tone="sub">
+              선택으로 받는 정보예요. 지금은 알람 계산에 쓰지 않아요.
+            </Text>
           </Card>
           {purePrepChanged ? (
             <Card>
@@ -179,75 +201,37 @@ export default function SettingsScreen() {
             </Card>
           ) : null}
 
-          <SectionHeader title="준비시간 예측 연구정보 (선택)" />
-          <Card>
-            <EditRow
-              first
-              label="준비시간 연구 정보"
-              value={prepareMlSurveySummary(profile)}
-              onPress={open('prepareMlSurvey')}
-            />
-            <Text variant="small" tone="sub">
-              선택으로 받는 정보예요. 지금은 알람 계산에 쓰지 않아요.
-            </Text>
-          </Card>
-
-          <SectionHeader title="알람" />
+          <SectionHeader title="알람 · 음성" />
           <Card>
             <EditRow first label="잠귀" value={WAKE_SENSITIVITY_NAME[profile.wake_sensitivity]} onPress={open('sleep')} />
             <EditRow label="깨우는 여유" value={WAKE_MARGIN_NAME[profile.wake_margin]} onPress={open('prepare')} />
+            <VoiceBriefingSection value={profile.alarm_voice_prefs} tone={voiceTone.tone} onSave={(next) => void saveEdit(next)} onPickTone={voiceTone.pick} disabled={!canEdit} toneDisabled={enabled && !canEdit} />
+            {/* 친구가 안 일어났을 때 깨울 수 있게 (친구 8장) — 기본 켬, 꺼 둬도 보낸 쪽에는 '지금은 깨울 수 없어요'만 보임 */}
+            {canEdit ? (
+              <View style={[styles.pingRow, styles.linkDivider]}>
+                <View style={styles.pingText}>
+                  <Text variant="body">깨우기 받기</Text>
+                  <Text variant="small" tone="sub">
+                    같은 그룹 친구가 깨울 수 있어요
+                  </Text>
+                </View>
+                <Toggle value={profile.wake_ping_enabled} onChange={(on) => void saveEdit({ wake_ping_enabled: on })} label="깨우기 받기" />
+              </View>
+            ) : null}
           </Card>
-
-          <VoiceBriefingSection value={profile.alarm_voice_prefs} tone={voiceTone.tone} onSave={(next) => void saveEdit(next)} onPickTone={voiceTone.pick} disabled={!canEdit} toneDisabled={enabled && !canEdit} />
         </>
       ) : null}
 
       {profile ? <FrequentPlacesSection center={homeOf(profile)} /> : null}
 
-      {/* 친구가 내가 안 일어났을 때 깨우는 알림을 보낼 수 있게 (친구 8장) — 기본 켬, 꺼 두면 보낸 쪽에는 '지금은 깨울 수 없어요'만 보이고 꺼 둔 사실은 안 드러남 */}
-      {profile && canEdit ? (
-        <>
-          <SectionHeader title="친구 알림" />
-          <Card>
-            <View style={styles.pingRow}>
-              <View style={styles.pingText}>
-                <Text variant="body">깨우기 받기</Text>
-                <Text variant="small" tone="sub">
-                  같은 그룹 친구가 알람이 울렸는데 안 일어났을 때 깨울 수 있어요
-                </Text>
-              </View>
-              <Toggle value={profile.wake_ping_enabled} onChange={(on) => void saveEdit({ wake_ping_enabled: on })} label="깨우기 받기" />
-            </View>
-          </Card>
-        </>
-      ) : null}
-
-      {/* 친구 · 공유 — 차단한 사람 (친구 4장). 친구 알림 가까이에 둠 (UX D-24) */}
-      <SectionHeader title="친구 · 공유" />
-      <Card>
-        <Pressable
-          onPress={() => router.push('/blocks')}
-          accessibilityRole="button"
-          accessibilityLabel="차단한 사람"
-          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
-        >
-          <Text variant="body">차단한 사람</Text>
-          <Text variant="body" tone="sub">
-            {blocks.data ? `${blocks.data.length}명 ›` : '›'}
-          </Text>
-        </Pressable>
-      </Card>
-
-      {/* 알람이 잘 울리게 하는 폰 설정 — 값이 아니라 길이라 프로필 값(위 "알람" 절)과 나눔. 가짜 모드에서도 보임 */}
-      <SectionHeader title="알람 점검" />
+      {/* 그 밖 — 알람이 잘 울리게 하는 폰 설정 · 차단 목록. 가짜 모드에서도 보임 */}
+      <SectionHeader title="그 밖" />
       <Card>
         {profile && notifyOff ? (
           <View style={styles.linkRow}>
             <Text variant="body">알림이 꺼져 있어요</Text>
-            <Button
+            <TextLink
               label="켜기"
-              small
-              variant="ghost"
               onPress={() =>
                 void turnOnNotifications('settings').then((result) => {
                   if (result === 'granted') void registerPushToken();
@@ -256,17 +240,7 @@ export default function SettingsScreen() {
             />
           </View>
         ) : profile ? (
-          <Pressable
-            onPress={() => void openAppNotificationSettings()}
-            accessibilityRole="button"
-            accessibilityLabel="알림 설정 열기"
-            style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
-          >
-            <Text variant="body">알림 설정 열기</Text>
-            <Text variant="body" tone="sub">
-              ›
-            </Text>
-          </Pressable>
+          <LinkRow first label="알림 설정 열기" onPress={() => void openAppNotificationSettings()} />
         ) : null}
         <Pressable
           onPress={() => router.push('/ring-check')}
@@ -284,6 +258,7 @@ export default function SettingsScreen() {
             ›
           </Text>
         </Pressable>
+        <LinkRow label="차단한 사람" value={blocks.data ? `${blocks.data.length}명` : undefined} onPress={() => router.push('/blocks')} />
       </Card>
 
       {enabled && user ? (
@@ -306,21 +281,8 @@ export default function SettingsScreen() {
             </Text>
           ) : null}
         </View>
-      ) : (
-        <Text variant="small">
-          {canUseRealData ? '실데이터 모드로 바꾸면 로그인 정보가 여기에 보여요.' : '이 빌드에서는 실데이터를 쓸 수 없어 로그인 정보가 없어요.'}
-        </Text>
-      )}
-
-      {/* 폰 출시용 빌드는 실데이터로 고정이라 개발 절이 없음 (lib/modePolicy.ts) */}
-      {modeLocked ? null : (
-        <>
-          <SectionHeader title="개발" right={canUseRealData ? undefined : '실데이터를 쓸 수 없음'} />
-          <DataModeToggle />
-          <Text variant="caption" style={styles.note}>
-            가짜 데이터는 목업 시나리오(5월 22일)로 로그인 없이 돌아요. 화면 목록은 /dev/screens
-          </Text>
-        </>
+      ) : canUseRealData ? null : (
+        <Text variant="small">이 빌드에서는 실데이터를 쓸 수 없어 로그인 정보가 없어요.</Text>
       )}
 
       {/* 편집 시트 — 내용은 루트에서 그려지므로 편집기가 자기 draft를 가짐. 한 번에 하나만 열림 */}
@@ -366,7 +328,6 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   stack: { gap: 8, marginTop: 16 },
-  note: { marginTop: 4, marginHorizontal: 4 },
   pingRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   pingText: { flex: 1, minWidth: 0 },
   linkRow: { minHeight: size.touch, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },

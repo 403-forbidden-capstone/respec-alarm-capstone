@@ -23,7 +23,7 @@ import { TimeRow } from '@/features/alarm/components/TimeRow';
 import { isHomeMissing } from '@/features/alarm/homeMissing';
 import { selectedUserPlaceLabel, withDestination, withUserPlace } from '@/features/alarm/destinationPick';
 import { homeOf } from '@/features/alarm/placeSheet';
-import { repeatToRrule } from '@/features/alarm/repeat';
+import { repeatLabel, repeatToRrule } from '@/features/alarm/repeat';
 import { saveNotice } from '@/features/alarm/saveNotice';
 import { addItems, earlierWakeOf, isPassed, parseDayParam, ringingKinds, tomorrow, upcomingAlarms } from '@/features/alarm/schedule';
 import {
@@ -109,6 +109,9 @@ export default function NewScheduleScreen() {
   const [pickedPlace, setPickedPlace] = useState<Place | null>(null); // 방금 고른 장소의 분류(category)를 경고 판정에만 잠깐 들고 있음 — 저장하지 않음 (D5)
   const auth = useAuth();
   const home = homeOf(auth.profile); // 프로필의 집 좌표 — 있으면 검색 결과를 집에서 가까운 순으로 (가짜 데이터의 가짜 프로필은 좌표가 없음)
+  const [showRepeat, setShowRepeat] = useState(false); // 반복 고르기 펼침
+  const [showOrigin, setShowOrigin] = useState(false); // 출발지 선택 펼침
+  const [showIntensity, setShowIntensity] = useState(false); // 알람 강도 세 줄 펼침
   const [showCalc, setShowCalc] = useState(false); // 계산 근거 "자세히"를 펼침
   const [homeMissing, setHomeMissing] = useState(false); // 계산이 집 위치를 몰라 막힘 — 안내 카드 [집 정하기]
   const [homeSheetOpen, setHomeSheetOpen] = useState(false); // 집 찾기 시트
@@ -123,6 +126,9 @@ export default function NewScheduleScreen() {
   const autoIntensity = autoLevel(draft.importance, 0);
   const setAxis = (axis: IntensityAxis, level: Level | null) => setLevels((old) => ({ ...old, [axis]: level }));
   const manualIntensity = AXES.some(([axis]) => levels[axis] != null);
+  // 접힌 강도 한 줄 — 직접 고른 값이 있으면 그 값 기준으로 보임
+  const lvOf = (axis: IntensityAxis): Level => levels[axis] ?? autoIntensity;
+  const intensitySummary = `${LEVELS[lvOf('sound')].name} · ${LEVELS[lvOf('sound')].sound} · ${LEVELS[lvOf('voice')].voice} · ${LEVELS[lvOf('vibration')].vibration}`;
 
   // 뭔가 입력했으면 나갈 때 한 번 물음 (처음 값 그대로면 묻지 않음)
   const dirty =
@@ -247,9 +253,6 @@ export default function NewScheduleScreen() {
       <Text variant="title" style={styles.title}>
         새 일정 만들기
       </Text>
-      <Text variant="lead" style={styles.lead}>
-        약속 정보를 바탕으로 필요한 알람을 계산해요.
-      </Text>
       <View style={styles.timetableLink}>
         <TextLink label="수업은 학교 시간표에서 한 번에 넣어요 ›" onPress={() => router.push('/timetable')} />
       </View>
@@ -287,7 +290,7 @@ export default function NewScheduleScreen() {
           onChange={(next) => set('time', formatTime24(next))}
           error={past ? '이미 지난 시각이에요' : undefined}
         />
-        {/* SelectRow와 같은 모양 — 누르면 목록 대신 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
+        {/* 장소 — 누르면 검색 시트. 실데이터는 고른 장소의 좌표도 초안에 담아 계산 · 저장 요청까지 가져감 (가짜 데이터는 좌표가 없음) */}
         <Pressable
           onPress={() => {
             setPlaceQuery('');
@@ -309,6 +312,11 @@ export default function NewScheduleScreen() {
             </Text>
           </View>
         </Pressable>
+        {userPlaces?.length ? (
+          <View style={styles.chipsRow}>
+            <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />
+          </View>
+        ) : null}
         {areaPlace ? (
           <AreaPlaceNote
             onSearch={() => {
@@ -317,7 +325,22 @@ export default function NewScheduleScreen() {
             }}
           />
         ) : null}
-        {/* 함께할 그룹을 장소 바로 아래 — 반복 요일 칩 · 출발지 버튼 아래로 밀려 첫 화면 밖이던 것 (D-12) */}
+        <MapPlaceSheet
+          visible={placeOpen}
+          onClose={() => setPlaceOpen(false)}
+          title="도착 장소"
+          search={(query) => listPlaces(query, home)}
+          initialQuery={placeQuery}
+          reverse={reverseAddress}
+          locate={locateOnce}
+          center={draft.placeLat != null && draft.placeLng != null ? { lat: draft.placeLat, lng: draft.placeLng } : home}
+          radius={{ initial: draft.destRadiusM ?? 150, presets: DESTINATION_RADIUS_PRESETS, hint: '이 원 안에 들어오면 도착으로 기록해요' }}
+          onPick={(picked) => {
+            setDraft((d) => withDestination(d, picked));
+            setPickedPlace(picked);
+            setPlaceOpen(false);
+          }}
+        />
         {groupOptions.length > 1 ? (
           <>
             {/* 함께할 그룹 — 고르면 공동 약속, 그룹원은 G02 연결 일정에서 보고 각자 [내 알람 만들기] (친구 9장) */}
@@ -329,7 +352,17 @@ export default function NewScheduleScreen() {
             ) : null}
           </>
         ) : null}
-        <RepeatPicker value={draft.repeat} onChange={(next) => set('repeat', next)} />
+        {/* 반복 — 기본은 한 줄, 누르면 매일 · 평일 · 요일 칩이 펴짐 */}
+        {showRepeat ? (
+          <>
+            <RepeatPicker value={draft.repeat} onChange={(next) => set('repeat', next)} />
+            <View style={styles.foldLink}>
+              <TextLink label="접기 ›" onPress={() => setShowRepeat(false)} />
+            </View>
+          </>
+        ) : (
+          <FoldRow label="반복" value={repeatLabel(draft.repeat)} onPress={() => setShowRepeat(true)} />
+        )}
       </Card>
 
       {/* 처음 장소 목록(최근 장소)을 못 읽었으면 이유 + 다시 시도 — 장소 검색 시트로는 그래도 고를 수 있음 */}
@@ -338,20 +371,29 @@ export default function NewScheduleScreen() {
         <Text variant="label" tone="sub">
           출발지와 이동 수단
         </Text>
-        <KeyValueRow label="출발지" value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')} />
-        <Text variant="caption" tone="sub">기본 출발지는 집이에요. 다른 위치를 고르면 이 일정에만 적용돼요.</Text>
-        <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} disabled={calculating} onPress={() => void runLocateOrigin(async () => {
-          const { point, reason } = await locateWithReason();
-          if (!point) {
-            toast(reason === 'denied' ? '위치 권한이 꺼져 있어요. 브라우저나 기기 설정을 확인해 주세요' : reason === 'timeout' ? '위치 확인 시간이 지났어요. 다시 시도하거나 출발지를 검색해 주세요' : '위치를 확인하지 못했어요. 기기 설정을 확인하거나 출발지를 검색해 주세요');
-            return;
-          }
-          setDraft((previous) => ({ ...previous, originLocation: point, originName: undefined }));
-          setHomeMissing(false);
-        }, '현재 위치를 가져오지 못했어요')} />
-        <Button variant="ghost" label="출발지 검색" disabled={locatingOrigin || calculating} onPress={() => setOriginOpen(true)} />
-        {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" disabled={locatingOrigin || calculating} onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined, originName: undefined }))} /> : null}
-        {draft.originLocation ? <Text variant="caption" tone="sub">선택한 위치는 일정에 저장돼요. 반복 일정은 모든 회차에 같은 위치를 사용해요.</Text> : null}
+        {/* 출발지 — 기본은 한 줄(집), 누르면 현재 위치 · 검색 선택이 펴짐. 바꾼 값은 한 줄에 보임 */}
+        <FoldRow
+          first
+          label="출발지"
+          value={draft.originLocation ? (draft.originName || '현재 위치') : (auth.profile?.home_name ?? '집 위치 미설정')}
+          open={showOrigin}
+          onPress={() => setShowOrigin((v) => !v)}
+        />
+        {showOrigin ? (
+          <View style={styles.originBody}>
+            <Button variant="ghost" label="현재 위치를 출발지로 사용" loading={locatingOrigin} disabled={calculating} onPress={() => void runLocateOrigin(async () => {
+              const { point, reason } = await locateWithReason();
+              if (!point) {
+                toast(reason === 'denied' ? '위치 권한이 꺼져 있어요. 브라우저나 기기 설정을 확인해 주세요' : reason === 'timeout' ? '위치 확인 시간이 지났어요. 다시 시도하거나 출발지를 검색해 주세요' : '위치를 확인하지 못했어요. 기기 설정을 확인하거나 출발지를 검색해 주세요');
+                return;
+              }
+              setDraft((previous) => ({ ...previous, originLocation: point, originName: undefined }));
+              setHomeMissing(false);
+            }, '현재 위치를 가져오지 못했어요')} />
+            <Button variant="ghost" label="출발지 검색" disabled={locatingOrigin || calculating} onPress={() => setOriginOpen(true)} />
+            {draft.originLocation ? <Button variant="ghost" label="집을 출발지로 사용" disabled={locatingOrigin || calculating} onPress={() => setDraft((previous) => ({ ...previous, originLocation: undefined, originName: undefined }))} /> : null}
+          </View>
+        ) : null}
         <MapPlaceSheet
           visible={originOpen}
           onClose={() => setOriginOpen(false)}
@@ -372,70 +414,61 @@ export default function NewScheduleScreen() {
             setOriginOpen(false);
           }}
         />
-        {userPlaces?.length ? (
-          <View style={styles.chipsRow}>
-            <FrequentPlaceChips places={userPlaces} selectedLabel={selectedUserPlaceLabel(draft, userPlaces)} onPick={(p) => setDraft((d) => withUserPlace(d, p))} />
-          </View>
-        ) : null}
-        <MapPlaceSheet
-          visible={placeOpen}
-          onClose={() => setPlaceOpen(false)}
-          title="도착 장소"
-          search={(query) => listPlaces(query, home)}
-          initialQuery={placeQuery}
-          reverse={reverseAddress}
-          locate={locateOnce}
-          center={draft.placeLat != null && draft.placeLng != null ? { lat: draft.placeLat, lng: draft.placeLng } : home}
-          radius={{ initial: draft.destRadiusM ?? 150, presets: DESTINATION_RADIUS_PRESETS, hint: '이 원 안에 들어오면 도착으로 기록해요' }}
-          onPick={(picked) => {
-            setDraft((d) => withDestination(d, picked));
-            setPickedPlace(picked);
-            setPlaceOpen(false);
-          }}
-        />
         <SelectRow<Transport>
           label="이동 수단"
           value={draft.transport}
           options={TRANSPORT_OPTIONS}
           onChange={(v) => set('transport', v)}
         />
-
       </Card>
 
       <Card>
         <Text variant="label" tone="sub">
           알람 강도
         </Text>
-        <Text variant="small" tone="sub">
-          배경음 · 말소리 · 진동을 각각 골라요. 두 번 미루거나 늦을 것 같으면 AI 목소리로 한 번 더 깨워요.
-        </Text>
-        <Text variant="small" tone="sub">
-          예상 자동 강도: {LEVELS[autoIntensity].name} (저장 시 지각 이력과 잠귀 설정도 반영)
-        </Text>
-        {AXES.map(([axis, name]) => {
-          const selected = levels[axis];
-          const level = selected ?? autoIntensity;
-          return (
-            <View key={axis} style={styles.axisRow}>
-              <View style={styles.axisTitle}>
-                <Text variant="rowLabel" tone="sub">{name}</Text>
-                {selected != null ? <Text variant="caption" tone="sub">직접 고름</Text> : null}
-              </View>
-              <OptionGrid<Level>
-                size="mini"
-                label={`${name} 강도`}
-                options={LEVEL_OPTIONS}
-                value={level}
-                onChange={(next) => setAxis(axis, next)}
-              />
-              <View style={styles.axisDetails}>
-                {selected != null ? <TextLink label="자동으로" onPress={() => setAxis(axis, null)} /> : <View />}
-                <Text variant="caption" tone="faint">{LEVELS[level][axis]}</Text>
-              </View>
-            </View>
-          );
-        })}
-        {manualIntensity ? <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ ...EMPTY_LEVELS })} /> : null}
+        {/* 기본은 한 줄 요약 — 바꾸기를 눌러야 배경음 · 말소리 · 진동이 펴짐 */}
+        <View style={styles.between}>
+          <Text variant="body" style={styles.summary}>
+            {intensitySummary}
+          </Text>
+          <TextLink label={showIntensity ? '접기 ›' : '바꾸기 ›'} onPress={() => setShowIntensity((v) => !v)} />
+        </View>
+        {showIntensity ? (
+          <>
+            <Text variant="small" tone="sub" style={styles.intensityNote}>
+              배경음 · 말소리 · 진동을 각각 골라요. 두 번 미루거나 늦을 것 같으면 AI 목소리로 한 번 더 깨워요.
+            </Text>
+            <Text variant="small" tone="sub">
+              예상 자동 강도: {LEVELS[autoIntensity].name} (저장 시 지각 이력과 잠귀 설정도 반영)
+            </Text>
+          </>
+        ) : null}
+        {showIntensity
+          ? AXES.map(([axis, name]) => {
+              const selected = levels[axis];
+              const level = selected ?? autoIntensity;
+              return (
+                <View key={axis} style={styles.axisRow}>
+                  <View style={styles.axisTitle}>
+                    <Text variant="rowLabel" tone="sub">{name}</Text>
+                    {selected != null ? <Text variant="caption" tone="sub">직접 고름</Text> : null}
+                  </View>
+                  <OptionGrid<Level>
+                    size="mini"
+                    label={`${name} 강도`}
+                    options={LEVEL_OPTIONS}
+                    value={level}
+                    onChange={(next) => setAxis(axis, next)}
+                  />
+                  <View style={styles.axisDetails}>
+                    {selected != null ? <TextLink label="자동으로" onPress={() => setAxis(axis, null)} /> : <View />}
+                    <Text variant="caption" tone="faint">{LEVELS[level][axis]}</Text>
+                  </View>
+                </View>
+              );
+            })
+          : null}
+        {showIntensity && manualIntensity ? <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ ...EMPTY_LEVELS })} /> : null}
       </Card>
 
       <Card>
@@ -477,9 +510,6 @@ export default function NewScheduleScreen() {
             ) : null}
           </Fragment>
         ))}
-        <Text variant="caption" tone="faint" style={styles.alarmNote}>
-          모두 끄면 알람 없이 일정만 저장해요.
-        </Text>
       </Card>
 
       {homeMissing ? <HomeMissingNotice onPickHome={() => setHomeSheetOpen(true)} busy={savingHome || locatingOrigin || calculating} /> : null}
@@ -527,6 +557,31 @@ export default function NewScheduleScreen() {
         ) : null}
       </Sheet>
     </Screen>
+  );
+}
+
+// 접었다 펴는 한 줄 — 이름 · 현재 값 ›. open을 안 주면 누르면 펴지는 줄로만 씀
+function FoldRow({ label, value, onPress, open, first }: { label: string; value: string; onPress: () => void; open?: boolean; first?: boolean }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} ${value}`}
+      accessibilityState={{ expanded: open ?? false }}
+      style={({ pressed }) => [styles.foldRow, !first && styles.foldDivider, pressed && styles.pressed]}
+    >
+      <Text variant="rowLabel" tone="sub">
+        {label}
+      </Text>
+      <View style={styles.placeValue}>
+        <Text variant="bodyStrong" numberOfLines={1} style={styles.placeName}>
+          {value}
+        </Text>
+        <Text variant="bodyStrong" tone="faint">
+          {open ? '⌃' : '›'}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -704,16 +759,21 @@ const styles = StyleSheet.create({
   titleLabel: { marginTop: 10, marginBottom: 6, fontSize: 13.5 },
   titleInput: { fontSize: 15, color: colors.ink, textAlign: 'left', backgroundColor: colors.chip, borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 4 },
   titleInputError: { borderColor: colors.warn },
+  between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 8 },
+  summary: { flex: 1 },
+  intensityNote: { marginTop: 8 },
+  foldRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
+  foldDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  foldLink: { alignSelf: 'flex-end', marginTop: 4 },
+  originBody: { gap: 8, marginBottom: 8 },
   timetableLink: { marginBottom: 12, alignSelf: 'flex-start' },
-  title: { marginTop: 8, marginBottom: 4 },
-  lead: { marginBottom: 18 },
+  title: { marginTop: 8, marginBottom: 12 },
   optLabel: { marginTop: 12, marginBottom: 8 },
   axisRow: { marginTop: 14 },
   axisTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   axisDetails: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 2 },
   groupNote: { marginTop: 6, marginBottom: 4 },
   cardLabel: { marginBottom: 8 },
-  alarmNote: { marginTop: 6 },
   wakeNote: { marginTop: -4, marginBottom: 8 },
   error: { marginTop: -4, marginBottom: 6 },
   stack: { gap: 10, marginTop: 16 },
@@ -728,8 +788,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
   },
   pressed: { opacity: 0.6 },
-  chipsRow: { marginTop: 8 },
-  placeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14 },
+  chipsRow: { marginTop: 0, marginBottom: 14 },
+  placeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 14, borderTopWidth: 1, borderTopColor: colors.line },
   placeValue: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   placeName: { flexShrink: 1 },
   step: { flexDirection: 'row', gap: 10, paddingVertical: 8 },

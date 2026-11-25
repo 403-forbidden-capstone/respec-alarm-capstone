@@ -26,7 +26,7 @@
 | 폰 개발용 (`__DEV__` true) | 바꿀 수 있음, 기본 실데이터 | 실데이터 모드에서만 | 값이 없으면 가짜만 |
 | 웹 | 바꿀 수 있음, **기본 가짜**, 주소 `?mode=real`이면 실데이터 | 실데이터 모드에서만 | 값이 없으면 가짜만 |
 
-`/dev/screens` 맨 위 · 설정 "개발" 절의 토글은 모드를 바꿀 수 있는 빌드에서만 보임. 실데이터 모드에서 로그인 전이면 `/dev/screens`에 시드 계정용 이메일 로그인(웹 · 폰 개발용)이 있음.
+`/dev/screens` 맨 위의 토글은 모드를 바꿀 수 있는 빌드에서만 보임. 실데이터 모드에서 로그인 전이면 `/dev/screens`에 시드 계정용 이메일 로그인(웹 · 폰 개발용)이 있음.
 
 **첫 화면** (`lib/flags` `ONBOARDING_IN_FLOW = true`, #25) — 앱을 처음 켜면 로그인 화면 하나만 나오고, 로그인한 뒤 프로필의 `onboarded_at`이 비어 있으면 단계 온보딩(`onboarding`)이 먼저, 끝내면 홈. 켜진 단계는 `lib/flags` `ONBOARDING_STEPS`. 로그인 화면 아래에 "알람 테스트" 바로 가기가 있어 로그인 전에도 `/dev/alarm-test`로 갈 수 있음 (출시용 APK에도 보임 — D16이 정해지면 같이 정리).
 
@@ -286,7 +286,7 @@
 - 푸시 토큰: 로그인 직후 · 앱이 앞에 올 때(6시간 넘었으면) `usePushRegistration` → 안드로이드 채널 5개(`friend_v1` · `alarm_change_v1` · `request_v1` · `group_v1` · `missed_v1`)를 먼저 만든 뒤 `register_push_token(p_token, p_platform)` — RPC. 안드로이드만, 실패해도 던지지 않음. 같은 폰에서 계정이 바뀌면 마지막 로그인 계정이 토큰 주인
 - `notify` 호출 모양: 요청에는 종류별 인자만(한 사람 = `targetUserId`, 그룹 = `groupId`) — 제목 · 본문 · data는 서버가 고정. 알람 바뀜(G04)은 `previousAt` · `newAt`(ISO)을 같이, 친구 요청 보냄(`REQUESTED`) → `FRIEND_REQUEST`, 수락 · 맞요청 자동 수락 → `FRIEND_ACCEPTED`, 그룹에 새로 들어옴(`JOINED`) → `GROUP_MEMBER_JOINED`. 본 동작이 끝난 뒤 기다리지 않고 부르며 실패해도 되돌리지 않음 (`features/social/real/push.ts`)
 - 알림 누르기(`usePushLinks`, `features/push/link.ts`): `data.recipientUserId`가 지금 로그인한 계정일 때만 갈 곳(`/wake` · `/alarms` · `/friends`(그룹 탭) · `/group`(`groupId`가 있으면 그 그룹, `subjectUserId`도 있으면 그 사람의 기상 확인), 깨우기는 받는 사람의 기상 확인 `/wake`(H08), 공동 약속 변경은 `needsConfirm`이면 `/alarm/changed?id=`), 아니면 홈. 로그인 전에 누르면 로그인 뒤에 이어감. 앞에 떠 있을 때 받은 알림 중 내 알람 바뀜 · 공동 약속 바뀜 · 취소는 폰 알람을 서버와 맞춤(`syncNow`)
-- 설정 '알람 점검' 첫 줄: 폰 알림 권한이 꺼져 있으면 '알림이 꺼져 있어요 [켜기]'(켜면 토큰 다시 등록), 아니면 '알림 설정 열기'
+- 설정 '그 밖' 첫 줄: 폰 알림 권한이 꺼져 있으면 '알림이 꺼져 있어요 [켜기]'(켜면 토큰 다시 등록), 아니면 '알림 설정 열기'
 
 ## Edge Function — 만들 것만
 

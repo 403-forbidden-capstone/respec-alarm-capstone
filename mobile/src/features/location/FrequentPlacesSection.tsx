@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, confirm, LoadError, Loading, SectionHeader, Sheet, Text, toast } from '@/components/ui';
 import { listPlaces, reverseAddress } from '@/features/alarm/api';
+import { TextLink } from '@/features/alarm/components/TextLink';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import type { PickedPlace } from '@/features/alarm/mapPicker';
 import type { LatLng } from '@/features/alarm/types';
@@ -88,7 +89,7 @@ export function FrequentPlacesSection({ center }: Props) {
             </Text>
           )}
           <View style={styles.add}>
-            <Button small variant="ghost" label="+ 추가" disabled={full} onPress={() => setMapFor({})} />
+            <TextLink label="+ 추가" disabled={full} onPress={() => setMapFor({})} />
             {full ? (
               <Text variant="small" tone="sub">
                 {MAX_USER_PLACES}개까지 저장할 수 있어요

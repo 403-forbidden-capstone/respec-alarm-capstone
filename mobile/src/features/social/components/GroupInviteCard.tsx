@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, Text } from '@/components/ui';
+import { TextLink } from '@/features/alarm/components/TextLink';
 
 import type { GroupInvite } from '../types';
 import { GroupIcon } from './GroupIcon';
@@ -19,7 +20,7 @@ export function GroupInviteCard({ invite, working, disabled, onAccept, onDecline
   return (
     <Card>
       <View style={styles.row}>
-        <GroupIcon label={invite.initial} />
+        <GroupIcon label={invite.initial} light />
         <View style={styles.grow}>
           <Text variant="big" numberOfLines={1}>
             {invite.name}
@@ -30,7 +31,7 @@ export function GroupInviteCard({ invite, working, disabled, onAccept, onDecline
         </View>
       </View>
       <View style={styles.actions}>
-        <Button variant="plain" label="거절" small disabled={disabled || working} onPress={onDecline} />
+        <TextLink label="거절" onPress={onDecline} disabled={disabled || working} />
         <Button label="참여" small loading={working} disabled={disabled} onPress={onAccept} />
       </View>
     </Card>
@@ -40,5 +41,5 @@ export function GroupInviteCard({ invite, working, disabled, onAccept, onDecline
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 10 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 18, marginTop: 10 },
 });

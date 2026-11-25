@@ -17,7 +17,6 @@ import { useGroupMenu } from '@/features/social/hooks/useGroupMenu';
 import { useWakeLoad } from '@/features/social/hooks/useGroupWake';
 import { usePersonMenu } from '@/features/social/hooks/usePersonMenu';
 import { MiniButton } from '@/features/social/components/MiniButton';
-import { PersonRow } from '@/features/social/components/PersonRow';
 import { permissionNames } from '@/features/social/permissions';
 import type { GroupDetail, GroupMember, Person } from '@/features/social/types';
 import { WAKE_STALE_TEXT } from '@/features/social/wakeTexts';
@@ -83,23 +82,6 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
         {g.members.length}명 · {g.since}
       </Text>
 
-      <Card>
-        <View style={[styles.between, styles.label]}>
-          <Text variant="label" tone="sub">
-            내가 공유 중
-          </Text>
-          <TextLink
-            label="공유 권한 설정 ›"
-            onPress={() => router.push({ pathname: '/permissions', params: { relation: `group:${g.id}` } })}
-          />
-        </View>
-        <View style={styles.chips}>
-          {(grants.length ? grants : ['공유 없음']).map((name) => (
-            <Chip key={name} label={name} />
-          ))}
-        </View>
-      </Card>
-
       {g.appointments.length ? (
         <Card>
           <Text variant="label" tone="sub" style={styles.label}>
@@ -154,22 +136,43 @@ function Detail({ group: g, stale, onBack, onChanged }: { group: GroupDetail; st
         ))}
       </Card>
 
-      {/* 안내 카드는 실선 — 점선은 비어 있을 때 쓰는 모양 (피그마 G02) */}
+      {/* 내가 공유 중 — 맨 아래로 (함께 보는 것이 먼저, 내 설정은 뒤) */}
       <Card>
-        <Text variant="label" tone="sub" style={styles.label}>
-          권한 안내
-        </Text>
-        <Text variant="small" tone="sub" style={styles.paragraph}>
-          그룹에서 권한을 회수해도 친구 관계나 다른 그룹에서 같은 권한을 허용했다면 해당 사용자의 최종 권한은 유지돼요.
-        </Text>
+        <View style={[styles.between, styles.label]}>
+          <Text variant="label" tone="sub">
+            내가 공유 중
+          </Text>
+          <TextLink
+            label="공유 권한 설정 ›"
+            onPress={() => router.push({ pathname: '/permissions', params: { relation: `group:${g.id}` } })}
+          />
+        </View>
+        <View style={styles.chips}>
+          {(grants.length ? grants : ['공유 없음']).map((name) => (
+            <Chip key={name} label={name} />
+          ))}
+        </View>
       </Card>
-
     </Screen>
   );
 }
 
-// 멤버 한 줄 — 기상 단계 글자 + 색 (14-파). '공유 안 함'(동의 안 함 · 숨김 · 차단)은 색 점 없이 글자만
-// 줄을 누르면 기상 상태(G03). 공유 안 함이면 이유 없이 볼 수 없다고만 알림 (상대가 왜 안 보이는지 드러내지 않음)
+// 멤버 한 줄 — 얼굴 · 이름 · 상태 글자(오른쪽 작게) + 한 줄 상태, 오른쪽 끝은 [···] 하나
+// 줄 전체를 누르면 기상 상태(G03). 공유 안 함이면 이유 없이 볼 수 없다고만 알림 (상대가 왜 안 보이는지 드러내지 않음)
+// [알람 보기]는 기상 상태 화면에 있어 줄에서는 뺌
+const STAGE_LABEL: Record<GroupMember['state']['stage'], string> = {
+  SCHEDULED: '취침 중',
+  RANG: '알람 울림',
+  WOKE: '기상 완료',
+  PREPARING: '준비 중',
+  PREP_SCHEDULED: '준비 전',
+  DEPARTED: '출발',
+  ARRIVED: '도착',
+  NO_ALARM: '알람 없음',
+  NOT_SHARED: '공유 안 함',
+  NO_APPOINTMENT: '약속 없음',
+};
+
 function MemberRow({
   member: m,
   groupId,
@@ -186,35 +189,48 @@ function MemberRow({
   const shared = m.state.stage !== 'NOT_SHARED';
   const name = m.person.short;
   const wakeReason = `${name}님의 기상 상태는 볼 수 없어요`;
-  const alarmReason = `${name}님이 알람 공유를 허용하지 않았어요`;
   const openWake = () =>
     router.push({ pathname: '/groups/[id]/members/[userId]', params: { id: groupId, userId: m.person.id } });
-  const sub = [m.person.handle, m.state.text, m.wakeHidden ? '내 기상 숨김' : null].filter(Boolean).join(' · '); // 멤버 줄 @아이디 — 차단 쌍은 서버가 아이디를 비워 이름만
+  const sub = [m.state.text, m.wakeHidden ? '내 기상 숨김' : null].filter(Boolean).join(' · ');
+  const body = (
+    <>
+      <Avatar initial={m.person.initial} dot={m.state.dot ?? undefined} />
+      <View style={styles.memberText}>
+        <View style={styles.memberTop}>
+          <Text variant="bodyStrong" numberOfLines={1} style={styles.grow}>
+            {m.person.name}
+          </Text>
+          <Text variant="caption" tone="sub">
+            {STAGE_LABEL[m.state.stage]}
+          </Text>
+        </View>
+        <Text variant="small" tone="sub" numberOfLines={1}>
+          {sub}
+        </Text>
+      </View>
+    </>
+  );
 
   return (
-    <PersonRow
-      first={first}
-      icon={<Avatar initial={m.person.initial} dot={m.state.dot ?? undefined} />}
-      title={m.person.name}
-      sub={sub}
-      onPress={m.isMe ? undefined : shared ? openWake : () => toast(wakeReason)}
-      rightIsButtons={m.isMe}
-      right={m.isMe ? <MiniButton label="내 알람" onPress={onMyAlarm} /> : undefined}
-      // 남의 줄은 버튼 3개(기상 상태 · 알람 보기 · ···)가 오른쪽에 있으면 이름 칸이 좁아져 아래 줄로 내림 (360폭)
-      actions={
-        m.isMe ? undefined : (
-          <>
-            <MiniButton label="기상 상태" disabledReason={shared ? undefined : wakeReason} onPress={openWake} />
-            <MiniButton
-              label="알람 보기"
-              disabledReason={m.received.viewAlarm ? undefined : alarmReason}
-              onPress={() => router.push({ pathname: '/friends/[id]/alarms', params: { id: m.person.id } })}
-            />
-            <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
-          </>
-        )
-      }
-    />
+    <View style={[styles.memberRow, !first && styles.divider]}>
+      {m.isMe ? (
+        <View style={styles.memberMain}>{body}</View>
+      ) : (
+        <Pressable
+          onPress={shared ? openWake : () => toast(wakeReason)}
+          accessibilityRole="button"
+          accessibilityLabel={`${m.person.name}님 기상 상태`}
+          style={({ pressed }) => [styles.memberMain, pressed && styles.pressed]}
+        >
+          {body}
+        </Pressable>
+      )}
+      {m.isMe ? (
+        <MiniButton label="내 알람" onPress={onMyAlarm} />
+      ) : (
+        <MiniButton label="···" accessibilityLabel={`${m.person.name}님 메뉴`} onPress={() => onMenu(m.person)} />
+      )}
+    </View>
   );
 }
 
@@ -230,6 +246,9 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.6 },
   sub: { marginTop: 4 },
   joinButton: { marginTop: 8, alignItems: 'flex-start' },
-  paragraph: { lineHeight: 20 },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  memberMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  memberText: { flex: 1, minWidth: 0 },
+  memberTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   stale: { marginBottom: 8 },
 });

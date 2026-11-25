@@ -1,6 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { Pressable, StyleSheet, View } from 'react-native';
+
+import { useAccent } from '@/lib/skyTone';
 
 import { Avatar, Button, Card, Chip, confirm, EmptyState, LoadError, Loading, Screen, SectionHeader, Segmented, Text, toast, TopBar, TopBarIconButton } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -22,7 +25,6 @@ import {
   searchPeople,
   sendFriendRequest,
 } from '@/features/social/api';
-import { ActionTile } from '@/features/social/components/ActionTile';
 import { ConsentSheet } from '@/features/social/components/ConsentSheet';
 import { GroupInviteCard } from '@/features/social/components/GroupInviteCard';
 import { GroupIcon } from '@/features/social/components/GroupIcon';
@@ -390,30 +392,22 @@ function GroupTab({
           {hiddenInvites > 0 ? <Button variant="ghost" label={moreInvitesText(hiddenInvites)} onPress={() => setShowAllInvites(true)} /> : null}
         </>
       ) : null}
-      <View style={styles.tiles}>
-        <ActionTile
-          dark
-          icon="+"
-          title="새 그룹 만들기"
-          sub="이름과 멤버 설정"
-          onPress={() => router.push('/groups/new')}
-        />
-        <ActionTile
-          icon="↳"
-          title="그룹 참여하기"
-          sub="초대 코드 입력"
-          onPress={() => router.push('/groups/join')}
-        />
-      </View>
-
-      <SectionHeader title="참여 중인 그룹" right={`${groups.length}개`} />
+      <SectionHeader
+        title="참여 중인 그룹"
+        right={
+          <View style={styles.links}>
+            <IconLink icon={{ ios: 'person.2.badge.plus', android: 'group_add', web: 'group_add' }} label="새 그룹" onPress={() => router.push('/groups/new')} />
+            <IconLink icon={{ ios: 'key', android: 'key', web: 'key' }} label="코드로 참여" onPress={() => router.push('/groups/join')} />
+          </View>
+        }
+      />
       {groups.length ? null : <EmptyState title="아직 참여한 그룹이 없어요" body="새 그룹을 만들거나 초대 코드로 참여해 보세요." />}
       {groups.map((g) => {
         const names = permissionNames(g.grants);
         return (
           <Card key={g.id} onPress={() => router.push({ pathname: '/groups/[id]', params: { id: g.id } })}>
             <View style={styles.between}>
-              <GroupIcon label={g.initial} />
+              <GroupIcon label={g.initial} light />
               <Text variant="body" tone="faint">
                 →
               </Text>
@@ -450,14 +444,29 @@ function Trailing({ label }: { label: string }) {
   );
 }
 
+// 구역 제목 옆 동작 — 작은 그림 + 포인트 색 글자 (새 그룹 · 코드로 참여)
+function IconLink({ icon, label, onPress }: { icon: SymbolViewProps['name']; label: string; onPress: () => void }) {
+  const accent = useAccent();
+  return (
+    <Pressable onPress={onPress} hitSlop={12} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.iconLink, pressed && styles.iconLinkPressed]}>
+      <SymbolView name={icon} size={17} tintColor={accent} />
+      <Text variant="rowLabel" weight={600} style={{ color: accent }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  iconLink: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  iconLinkPressed: { opacity: 0.6 },
   title: { marginTop: 4, marginBottom: 16 }, // 설명 글 없이 첫 카드로 — 붙어 보이지 않게 16
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0 },
   requestActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 10 },
   between: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   trailing: { alignItems: 'flex-end' },
-  tiles: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  links: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   groupNameTop: { marginTop: 10 },
   groupSub: { marginTop: 2, marginBottom: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

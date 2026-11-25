@@ -13,7 +13,7 @@ const MODES = [
 export const goAfterRender = (href: Href) => setTimeout(() => router.replace(href), 0);
 
 // 데이터 모드를 바꿈 — 바꾸면 처음 화면으로, 실데이터인데 저장된 로그인이 없으면 로그인으로
-// 아래 토글(/dev/screens · 설정 개발 절)과 웹 미리보기 왼쪽 패널(components/dev/DevicePanel)이 같이 씀 — 토스트 · 이동이 어디서 바꿔도 같음
+// 아래 토글(/dev/screens)와 웹 미리보기 왼쪽 패널(components/dev/DevicePanel)이 같이 씀 — 토스트 · 이동이 어디서 바꿔도 같음
 export async function changeDataMode(next: DataMode) {
   if (next === getMode()) return; // 지금 모드를 다시 누르면 그대로 (Segmented는 같은 값도 onChange를 부름)
   if (setMode(next) !== next) {
@@ -24,7 +24,7 @@ export async function changeDataMode(next: DataMode) {
   goAfterRender(next === 'real' && !(await hasSession().catch(() => false)) ? '/login' : '/');
 }
 
-// 데이터 모드 토글 (/dev/screens · 설정 개발 절)
+// 데이터 모드 토글 (/dev/screens)
 // 폰 출시용 빌드(모드 고정, lib/modePolicy.ts)에서는 그리지 않음
 export function DataModeToggle() {
   const { mode } = useMode();
