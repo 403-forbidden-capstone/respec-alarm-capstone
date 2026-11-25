@@ -59,9 +59,14 @@ function VoiceRow({ voice, micOn, micDisabled, onSpeak, onToggleMode }: Props) {
         <View style={styles.micLine}>
           <Wave state={voice} />
           <View style={styles.micWrap}>
-            {/* 마이크 둘레 — 포인트 색을 옅게 깐 원 + 테두리. 기본에도 은은하게, 듣거나 말하는 중엔 조금 짙게 */}
-            <View style={[styles.halo, { backgroundColor: accent, opacity: voice === 'idle' ? 0.14 : 0.22 }]} />
-            <View style={[styles.halo, styles.haloRing, { borderColor: accent, opacity: voice === 'idle' ? 0.3 : 0.5 }]} />
+            {/* 마이크 둘레 — 포인트 색 반투명 원 3겹(테두리 없음). 바깥일수록 옅어 은은하게 퍼짐, 듣거나 말하는 중엔 조금 짙게 */}
+            {HALO_LAYERS.map(([size, idle, active]) => (
+              <View
+                key={size}
+                pointerEvents="none"
+                style={[styles.halo, { width: size, height: size, borderRadius: size / 2, backgroundColor: accent, opacity: voice === 'idle' ? idle : active }]}
+              />
+            ))}
             <Pressable
               onPress={onSpeak}
               disabled={micDisabled}
@@ -216,6 +221,12 @@ const BTN_SMALL = 38; // 음성 모드 키보드 버튼
 const MIC = 44;
 const HALO_PAD = 4; // 마이크 둘레 원 두께
 const HALO = MIC + HALO_PAD * 2; // 음성 칸 높이 = 테두리 2 + 여백 4×2 + 원 52 + 글 16 = 78
+// [지름, 기본 투명도, 듣는 · 말하는 중 투명도] — 겹쳐 그려 안쪽일수록 짙어짐. 바깥 겹은 자리(HALO)를 넘쳐도 배치는 그대로(절대 위치)
+const HALO_LAYERS: [number, number, number][] = [
+  [HALO + 8, 0.05, 0.08],
+  [HALO, 0.08, 0.12],
+  [MIC + 4, 0.12, 0.18],
+];
 const INPUT_LINES = 5; // 입력칸이 늘어나는 최대 줄 수
 const INPUT_BORDER = 1;
 const INPUT_PAD = (BTN - typeScale.body.lineHeight) / 2 - INPUT_BORDER; // 한 줄일 때 칸 높이 = 버튼(44)
@@ -239,8 +250,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center' }, // 마이크 원 바로 아래 글
   micLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   micWrap: { width: HALO, height: HALO, alignItems: 'center', justifyContent: 'center' },
-  halo: { position: 'absolute', width: HALO, height: HALO, borderRadius: HALO / 2 },
-  haloRing: { borderWidth: 1 },
+  halo: { position: 'absolute' },
   mic: { width: MIC, height: MIC, borderRadius: MIC / 2, alignItems: 'center', justifyContent: 'center' },
   wave: { flexDirection: 'row', alignItems: 'center', gap: 2.5, height: 22 },
   bar: { width: 2.5, height: 22, borderRadius: 1.25 },
