@@ -12,7 +12,7 @@ import { hasHome } from '@/features/onboarding/home';
 import { CampusCard } from '@/features/onboarding/components/CampusCard';
 import { ImportNoticeCard } from '@/features/onboarding/components/ImportNoticeCard';
 import { HomePlaceStep } from '@/features/onboarding/components/HomePlaceStep';
-import { consentBlocked, consentItems, PRIVACY_VERSION } from '@/features/onboarding/consent';
+import { AGE_CHECK_BUTTON_HINT, consentBlocked, consentItems, PRIVACY_VERSION } from '@/features/onboarding/consent';
 import { OnboardingDoneStep } from '@/features/onboarding/components/OnboardingDoneStep';
 import { OnboardingFrame } from '@/features/onboarding/components/OnboardingFrame';
 import { CalendarPickSheet } from '@/features/onboarding/components/CalendarPickSheet';
@@ -30,7 +30,7 @@ import { useTimetableStep } from '@/features/onboarding/hooks/useTimetableStep';
 import { permissionRows } from '@/features/onboarding/permissionRows';
 import { nextStep, ONBOARDING_ORDER, prevStep, startStep, stepNumber, type OnboardingStepId, type StepFlags } from '@/features/onboarding/steps';
 import { cleanHandle, cleanNickname, isHandleFormat, isNicknameOk, NICKNAME_MAX, shouldSaveHandle } from '@/features/onboarding/validate';
-import { ConsentStep } from '@/features/onboarding/views/ConsentStep';
+import { AgeCheck, ConsentStep } from '@/features/onboarding/views/ConsentStep';
 import { HandleStep } from '@/features/onboarding/views/HandleStep';
 import { NicknameStep } from '@/features/onboarding/views/NicknameStep';
 import { PrepareStep, type PrepareMlDraft, type PrepareValues } from '@/features/onboarding/views/PrepareStep';
@@ -69,6 +69,8 @@ type StepView = {
   onPrimary: () => void;
   secondaryLabel?: string;
   onSecondary?: () => void;
+  aboveFooter?: ReactNode;
+  footerHint?: string;
 };
 
 // 처음 설정 — 켜진 단계를 순서대로 한 번에 하나씩 (단계 표 · 켜고 끄기: features/onboarding/steps.ts, lib/flags ONBOARDING_STEPS)
@@ -381,7 +383,9 @@ export default function OnboardingScreen() {
     consent: {
       title: '개인정보 안내',
       lead: '앱이 읽는 것과 읽지 않는 것이에요',
-      body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} ageChecked={ageChecked} onAgeChange={alreadyAgreed ? undefined : setAgeChecked} />,
+      body: <ConsentStep items={consentItems(TIMETABLE_PATHS)} />,
+      aboveFooter: alreadyAgreed ? undefined : <AgeCheck checked={ageChecked} onChange={setAgeChecked} showHint={false} />, // 만 14세 확인은 버튼 바로 위 — 스크롤 끝까지 안 가도 보임 (UX A-02)
+      footerHint: AGE_CHECK_BUTTON_HINT,
       primaryLabel: '동의하고 계속',
       primaryDisabled: consentBlocked(alreadyAgreed, ageChecked), // 만 14세 이상을 체크하지 않으면 가입을 끝내지 않음 (13-20). 이미 이 판에 동의한 계정은 다시 묻지 않음
       onPrimary: next,
@@ -434,6 +438,8 @@ export default function OnboardingScreen() {
       secondaryLabel={view.secondaryLabel}
       onSecondary={view.onSecondary}
       onBack={prev ? () => setStep(prev) : undefined}
+      aboveFooter={view.aboveFooter}
+      footerHint={view.footerHint}
     >
       {view.body}
     </OnboardingFrame>

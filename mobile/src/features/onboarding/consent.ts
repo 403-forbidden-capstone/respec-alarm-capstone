@@ -70,6 +70,7 @@ export const CONSENT_ITEMS: readonly ConsentItem[] = [
 // 온보딩 동의 1장의 '만 14세 이상' 확인 — 체크하지 않으면 가입을 끝내지 않음 (친구 13-아 · 13-20)
 export const AGE_CHECK_LABEL = '만 14세 이상이에요';
 export const AGE_CHECK_HINT = '체크해야 계속할 수 있어요';
+export const AGE_CHECK_BUTTON_HINT = '만 14세 이상 확인을 눌러 주세요'; // [동의하고 계속]이 꺼져 있을 때 버튼 아래 한 줄
 
 // 동의 단계의 [동의하고 계속]을 막는지 — 이 판에 이미 동의한 계정이 아니면 만 14세 이상을 체크해야 넘음 (13-20)
 export const consentBlocked = (alreadyAgreed: boolean, ageChecked: boolean) => !alreadyAgreed && !ageChecked;
