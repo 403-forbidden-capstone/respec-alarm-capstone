@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 
 import { Text } from '@/components/ui';
@@ -29,16 +29,16 @@ function Wheel({ label, options, value, onChange, loop = false }: WheelProps) {
   const count = options.length;
   const entries = loop ? [...options, ...options, ...options] : options;
   const middle = (index: number) => index + (loop ? count : 0);
-  const initial = useRef({ x: 0, y: middle(value) * ROW }).current;
+  const [initial] = useState(() => ({ x: 0, y: middle(value) * ROW }));
   const scroll = useRef<ScrollView>(null);
   const ready = useRef(false);
   const selected = useRef(middle(value));
   const logical = useRef(value);
   const offset = useRef(initial.y);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [active, setActive] = useState(selected.current);
+  const [active, setActive] = useState(() => middle(value));
   const change = useRef(onChange);
-  change.current = onChange;
+  useLayoutEffect(() => { change.current = onChange; }, [onChange]);
 
   const position = (index: number) => {
     selected.current = index;
@@ -125,7 +125,7 @@ function Wheel({ label, options, value, onChange, loop = false }: WheelProps) {
             <Pressable key={index} style={styles.item} onPress={() => choose(index)}
               accessibilityLabel={label + ' ' + item} accessibilityRole="button" accessibilityState={{ selected: distance === 0 }}>
               <Text variant="compare" weight={distance === 0 ? 600 : 400} tone={distance === 0 ? 'ink' : 'faint'}
-                style={[styles.number, distance > 1 && styles.outer]}>
+                style={distance > 1 ? styles.outer : undefined}>
                 {item}
               </Text>
             </Pressable>
@@ -136,29 +136,33 @@ function Wheel({ label, options, value, onChange, loop = false }: WheelProps) {
   );
 }
 
+export function changeWheelTime(value: Date, part: 'hour' | 'minute' | 'period', index: number): Date {
+  const current = minuteOfDay(value);
+  const h = Math.floor(current / 60);
+  const m = current % 60;
+  const nextHour = part === 'hour' ? ((index + 1) % 12) + (h >= 12 ? 12 : 0)
+    : part === 'period' ? h % 12 + index * 12 : h;
+  return addMinutes(startOfDay(value), nextHour * 60 + (part === 'minute' ? index : m));
+}
+
 export function AlarmWheelPicker({ value, onChange }: { value: Date; onChange: (next: Date) => void }) {
   const latest = useRef(value);
-  latest.current = value;
+  useLayoutEffect(() => { latest.current = value; }, [value]);
   const minute = minuteOfDay(value);
   const hour = Math.floor(minute / 60);
   // 두 열을 빠르게 연달아 움직여도 직전에 선택한 다른 열의 값을 유지한다.
   const update = (part: 'hour' | 'minute' | 'period', index: number) => {
-    const current = minuteOfDay(latest.current);
-    const h = Math.floor(current / 60);
-    const m = current % 60;
-    const nextHour = part === 'hour' ? ((index + 1) % 12) + (h >= 12 ? 12 : 0)
-      : part === 'period' ? h % 12 + index * 12 : h;
-    const next = addMinutes(startOfDay(latest.current), nextHour * 60 + (part === 'minute' ? index : m));
+    const next = changeWheelTime(latest.current, part, index);
     latest.current = next;
     onChange(next);
   };
   return (
     <View style={styles.wrap}>
       <View pointerEvents="none" style={styles.selection} />
+      <Wheel label="오전 오후" options={PERIODS} value={hour >= 12 ? 1 : 0} onChange={(i) => update('period', i)} />
       <Wheel label="시" options={HOURS} value={(hour % 12 || 12) - 1} loop onChange={(i) => update('hour', i)} />
       <View pointerEvents="none" style={styles.separator}><Text variant="compare">:</Text></View>
       <Wheel label="분" options={MINUTES} value={minute % 60} loop onChange={(i) => update('minute', i)} />
-      <Wheel label="오전 오후" options={PERIODS} value={hour >= 12 ? 1 : 0} onChange={(i) => update('period', i)} />
     </View>
   );
 }
@@ -170,7 +174,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingVertical: PAD },
   item: { height: ROW, alignItems: 'center', justifyContent: 'center' },
-  number: { fontSize: 27, lineHeight: 36 },
-  outer: { opacity: 0.58, fontSize: 23 },
+  outer: { opacity: 0.58 },
   separator: { width: 12, alignItems: 'center' },
 });
