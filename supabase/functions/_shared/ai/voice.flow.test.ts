@@ -207,7 +207,7 @@ test('녹화 한 바퀴: 첫 마디 템플릿 → 새 약속 카드 → 계산 �
     assert.ok((c.input_tokens as number) > 0 && (c.output_tokens as number) > 0, '토큰');
     assert.ok((c.latency_ms as number) > 0, '지연');
     assert.equal(c.io, null);
-    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.6' : 'v2-g');
+    assert.equal(c.prompt_version, c.point === 'T1' ? 'v1.7' : 'v2-h');
   }
   const flagged = calls.filter((c) => (c.flags as string[]).length > 0);
   assert.ok(flagged.some((c) => (c.flags as string[]).includes('claims_saved_without_event')), '가드에 걸린 호출의 flags');
@@ -504,6 +504,20 @@ test('위기 (헤드 10/30 B안): 위기 말 한 번 뒤 평범한 말에는 109
   assert.ok(line.guard?.includes('drop_sentence'));
 });
 
+test('외국 글자 고침 표시(stray_script_fixed)는 가드 표시와 같이 ai_calls에 남음 — 가드가 덮어쓰지 않음', async () => {
+  const db = seed();
+  const mixed = { ...t1('crisis_repeat'), reply: '푹 쉬어요. 피곤ス서 많이 힘드셨겠어요. 힘들 땐 109(자살예방 상담전화)에 언제든 전화할 수 있어요.' };
+  const { deps } = depsOf(db, { T2F: [t2f('crisis'), t2f('empty')], T1: [t1('preview'), t1('crisis'), mixed] });
+  const s = await handleVoiceSession(deps, { session_type: 'BEFORE_SLEEP', input_mode: 'TEXT' });
+  const sid = s.session_id as string;
+  const r1 = await handleVoiceTurn(deps, text(sid, 1, '다 의미 없는 것 같아'));
+  const r2 = await handleVoiceTurn(deps, text(sid, r1.rev, '아니야 그냥 피곤해서'));
+  assert.equal(r2.reply?.text, '푹 쉬어요. 피곤해서 많이 힘드셨겠어요.'); // 사용자 말로 고치고, 109 문장은 가드가 지움
+  const last = db.rows('ai_calls').filter((c) => c.point === 'T1').at(-1)!;
+  assert.ok((last.flags as string[]).includes('stray_script_fixed'));
+  assert.ok((last.flags as string[]).includes('hotline_repeat'));
+});
+
 test("위기 (헤드 10/30): T2F 실패 턴은 위험 판단 '모름' — 이미 안내한 대화에서도 모델이 낸 109 문장을 안 지움", async () => {
   const db = seed();
   const { deps } = depsOf(db, { T2F: [t2f('crisis'), upstreamError(), upstreamError()], T1: [t1('preview'), t1('crisis'), t1('crisis_repeat')] });
@@ -790,7 +804,7 @@ for (const [name, said] of [
 // ───────── AI 대화 품질 (T1 v1.6) — 단답에 안 끝냄 · 내일 일정 물음(ASK_TOMORROW = acts REFLECT) · 규칙 문구 ─────────
 test('T1 v1.6 시스템 글: 단답 한 번에 안 끝냄 · 내일 일정 물음 · 확인 문장 반복 금지 · 장소는 카드로 · 근거 줄 규칙이 있음', () => {
   const sys = POINTS.T1.prompt.system;
-  assert.equal(POINTS.T1.prompt.version, 'v1.6');
+  assert.equal(POINTS.T1.prompt.version, 'v1.7');
   assert.match(sys, /ASK_TOMORROW/);
   assert.match(sys, /단답 한 번으로는 끝내지 마/); // ①
   assert.match(sys, /내일 챙길 일정이 있어요\?/);

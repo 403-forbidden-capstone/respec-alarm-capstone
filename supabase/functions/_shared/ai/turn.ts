@@ -14,7 +14,7 @@
 // 모델 호출마다 ai_calls 한 줄(서버 키). 모델 호출 · 키 읽기는 deps.llm(null이면 NOT_CONFIGURED)만 통한다 — 이 파일은 Deno API를 안 써서 node --test로 돈다.
 import { HttpError } from '../errors.ts';
 import type { Db } from '../supabase.ts';
-import { FAIL_MESSAGES, toHttpError, type LlmClient, type LlmFailure, type LlmResult } from './llm.ts';
+import { FAIL_MESSAGES, STRAY_FLAG, toHttpError, type LlmClient, type LlmFailure, type LlmResult } from './llm.ts';
 import { POINTS, callPoint, type PointId } from '../prompts/index.ts';
 import { render } from './render.ts';
 import { applyGuards, eventsForView, fallbackReply, safetyInfoFrom } from './guards.ts';
@@ -115,7 +115,8 @@ class Run {
   /** 이 호출 기록에 규칙 걸림(flags)을 적음 */
   flag(r: LlmResult, flags: string[]): void {
     const log = this.logs.find((l) => l.call === r.call);
-    if (log) log.call.flags = flags;
+    // 가드 표시는 바꿔 쓰되(다시 검사하면 새 결과), 호출 관문이 붙인 외국 글자 표시(stray_script · _fixed)는 남김
+    if (log) log.call.flags = [...log.call.flags.filter((f) => f.startsWith(STRAY_FLAG)), ...flags];
   }
 }
 
