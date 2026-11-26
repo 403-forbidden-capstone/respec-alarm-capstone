@@ -190,18 +190,19 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
 //   wake_scripts = 알람 기상 대본 캐시 (alarm-briefing만 서버 키로 읽고 씀) — 아래 "기상 대본 캐시"에서 따로 확인
+//   weekly_summaries = R02 주간 AI 요약 캐시 (weekly-summary만 서버 키로 읽고 씀) — 아래 "주간 요약 캐시"에서 따로 확인
 //   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device · alarm-events-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
 //   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
 //   server_settings = 서버 전용 설정(M7, 예측 켜기 조건 — 서버(service_role)만 읽음) — 아래 "서버 전용 설정 표"에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'briefing_devices',
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'weekly_summaries', 'briefing_devices',
                      'server_routes', 'server_route_users', 'server_heartbeat', 'server_settings'];
 
-await check('모든 public 테이블(앱 38개 — 서버 전용 14개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 39개 — 서버 전용 15개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 38 && r.length === 41 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 39 && r.length === 42 && off.length === 0 ? true : { count: r.length, app, off };
 });
 
 await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
@@ -232,6 +233,39 @@ await check('기상 대본 캐시(wake_scripts): RLS 켜짐, 앱(anon · authent
     (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
   return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && !x.client_update && x.server_read && x.server_insert
     && x.on_delete === 'c' && /'AW'/.test(x.point_check) && /'AV'/.test(x.point_check) && /'LV'/.test(x.point_check) ? true : x;
+});
+
+await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정을 지우면 같이 지워짐 · 월요일만 · 잠금 함수는 서버만 · ai_calls에 WS 지점 · 내 시험 데이터 지우기에 지워짐', async () => {
+  const [x] = await q(`select
+    (select relrowsecurity from pg_class where oid='public.weekly_summaries'::regclass) as rls,
+    has_table_privilege('anon', 'public.weekly_summaries', 'select') as anon_read,
+    has_table_privilege('authenticated', 'public.weekly_summaries', 'select') as client_read,
+    has_table_privilege('authenticated', 'public.weekly_summaries', 'insert') as client_insert,
+    has_table_privilege('service_role', 'public.weekly_summaries', 'insert') as server_insert,
+    (select confdeltype from pg_constraint where conname = 'weekly_summaries_user_id_fkey') as on_delete,
+    (select count(*) from pg_constraint where conname = 'weekly_summaries_monday') as monday,
+    has_function_privilege('authenticated', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as client_claim,
+    has_function_privilege('service_role', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as server_claim,
+    (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
+  // 내 시험 데이터 지우기 — 시험 계정(@example.com)의 주간 요약만 지움, 남의 줄은 그대로
+  const WS_ME = 'e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1';
+  const WS_OTHER = 'e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2';
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'weekly-me@example.com', '{}'::jsonb), ($2, 'weekly-other@example.com', '{}'::jsonb)`, [WS_ME, WS_OTHER]);
+  await su();
+  const wsIns = (u) => q(`insert into public.weekly_summaries (user_id, week_start, input_hash, summary, day_dates, model) values ($1, '2026-11-23', 'h', '요약', array['2026-11-24']::date[], 'm')`, [u]);
+  await wsIns(WS_ME);
+  await wsIns(WS_OTHER);
+  await as(WS_ME);
+  await q(`select public.dev_reset_my_data()`);
+  await su();
+  const wsLeft = Object.fromEntries((await q(`select user_id::text as u, count(*)::int as n from public.weekly_summaries where user_id in ($1, $2) group by 1`, [WS_ME, WS_OTHER])).map((r) => [r.u, r.n]));
+  x.reset = wsLeft;
+  // 만든 시험 계정은 지움 — 뒤 검사(사용자 수 · 프로필 목록)에 안 섞이게. profiles · weekly_summaries는 cascade로 같이
+  await q(`delete from auth.users where id in ($1, $2)`, [WS_ME, WS_OTHER]);
+  return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && x.server_insert
+    && x.on_delete === 'c' && Number(x.monday) === 1 && !x.client_claim && x.server_claim && /'WS'/.test(x.point_check) && /'AW'/.test(x.point_check)
+    && !wsLeft[WS_ME] && wsLeft[WS_OTHER] === 1 ? true : x;
 });
 
 await check('기기 키(briefing_devices): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정(profiles)을 지우면 같이 지워짐, 해시 모양만 · 해시 겹침 없음', async () => {
@@ -3442,7 +3476,7 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 //   (user_blocks는 사용자 칸 이름이 blocker_id라 이 가드의 열 목록 밖 — 지움은 friend/ch15.mjs 15-타가 직접 봄)
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
                        'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'routine_suggestions', 'sharing_permissions', 'user_edit_logs', 'wake_hides',
-                       'wake_scripts'];   // wake_scripts = 알람이 지워질 때 FK(on delete cascade)로 같이 지워짐 — 함수는 안 고침
+                       'wake_scripts', 'weekly_summaries'];   // weekly_summaries = 함수가 내 줄을 지움(20261126130000). wake_scripts = 알람이 지워질 때 FK(on delete cascade)로 같이 지워짐 — 함수는 안 고침
 //   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
 //   briefing_devices(기기 키)는 둠 — 시험 데이터 지우기는 로그인 그대로라 이 기기의 백그라운드 갱신이 계속 돌아야 함 (push_tokens와 같은 이유)
 //   server_route_users(서버 전환 스위치 canary 대상)는 시험 데이터가 아니라 운영 설정이라 둠
@@ -3466,6 +3500,7 @@ const MINE = {
   push_tickets: `select * from public.push_tickets where user_id = $1`,
   wake_hides: `select * from public.wake_hides where $1 in (owner_id, hidden_from_id)`,
   wake_scripts: `select * from public.wake_scripts where user_id = $1`,
+  weekly_summaries: `select * from public.weekly_summaries where user_id = $1`,
   briefing_devices: `select * from public.briefing_devices where user_id = $1`,
   alarm_proposals: `select * from public.alarm_proposals where $1 in (owner_id, proposer_id)`,
   push_tokens: `select * from public.push_tokens where user_id = $1`,

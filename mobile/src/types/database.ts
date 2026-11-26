@@ -928,6 +928,25 @@ isOneToOne: false
       referencedColumns: ["user_id"]
     }
                   ]
+                },"weekly_summaries": {
+                  Row: {
+                    "claimed_until": string | null,"day_dates": (string)[] | null,"generated_at": string | null,"input_hash": string | null,"model": string | null,"summary": string | null,"user_id": string,"week_start": string
+                  }
+                  Insert: {
+                    "claimed_until"?: string | null,"day_dates"?: (string)[] | null,"generated_at"?: string | null,"input_hash"?: string | null,"model"?: string | null,"summary"?: string | null,"user_id": string,"week_start": string
+                  }
+                  Update: {
+                    "claimed_until"?: string | null,"day_dates"?: (string)[] | null,"generated_at"?: string | null,"input_hash"?: string | null,"model"?: string | null,"summary"?: string | null,"user_id"?: string,"week_start"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "weekly_summaries_user_id_fkey"
+      columns: ["user_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["user_id"]
+    }
+                  ]
                 }
           }
           Views: {
@@ -977,6 +996,9 @@ isOneToOne: false
 { Args: { "p_now"?: string }; Returns: {
               "event_key": string,"group_id": string,"kind": string,"recipient_id": string,"sleeper_id": string
             }[]
+                           },
+"claim_weekly_summary":
+{ Args: { "p_seconds"?: number,"p_user_id": string,"p_week_start": string }; Returns: boolean
                            },
 "confirm_prep_start_self_report":
 { Args: { "p_appointment_id": string }; Returns: string
