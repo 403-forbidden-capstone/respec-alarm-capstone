@@ -190,18 +190,19 @@ const MEETING = ['decision_comments', 'decision_votes', 'decision_states'];
 //   push_sends = 친구 8장 (깨우기 · 미확인 친구 알림 보낸 기록, DB 함수로만) — friend/ch08.mjs에서 따로 확인
 //   team_members = 친구 4장 꼬리 (운영 화면을 열 수 있는 팀원 목록, 추가는 서버 키로) — friend/ch04.mjs에서 따로 확인
 //   wake_scripts = 알람 기상 대본 캐시 (alarm-briefing만 서버 키로 읽고 씀) — 아래 "기상 대본 캐시"에서 따로 확인
+//   weekly_summaries = R02 주간 AI 요약 캐시 (weekly-summary만 서버 키로 읽고 씀) — 아래 "주간 요약 캐시"에서 따로 확인
 //   briefing_devices = 백그라운드 브리핑 갱신용 기기 키 해시 (#515, briefing-device · alarm-briefing-device · alarm-events-device만 서버 키로) — 아래 "기기 키"에서 따로 확인
 //   server_routes · server_route_users · server_heartbeat = 서버 전환 스위치(M1, 앱은 get_server_routes()로만 읽음) — 아래 "서버 전환 스위치"에서 따로 확인
 //   server_settings = 서버 전용 설정(M7, 예측 켜기 조건 — 서버(service_role)만 읽음) — 아래 "서버 전용 설정 표"에서 따로 확인
-const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'briefing_devices',
+const SERVER_ONLY = ['roll_attempts', 'rate_limit_events', 'friend_links', 'reports', 'push_tickets', 'push_sends', 'team_members', 'prepare_ml_verified_profiles', 'wake_scripts', 'weekly_summaries', 'briefing_devices',
                      'server_routes', 'server_route_users', 'server_heartbeat', 'server_settings'];
 
-await check('모든 public 테이블(앱 38개 — 서버 전용 14개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
+await check('모든 public 테이블(앱 39개 — 서버 전용 15개 포함 + 회의 도구 3개)에 RLS가 켜져 있음', async () => {
   const r = await q(`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
                      where n.nspname = 'public' and c.relkind = 'r' order by 1`);
   const off = r.filter((x) => !x.relrowsecurity).map((x) => x.relname);
   const app = r.filter((x) => !MEETING.includes(x.relname)).length;
-  return app === 38 && r.length === 41 && off.length === 0 ? true : { count: r.length, app, off };
+  return app === 39 && r.length === 42 && off.length === 0 ? true : { count: r.length, app, off };
 });
 
 await check('검증된 ML 프로필: RLS 켜짐, 사용자 접근 차단, 서비스 역할만 접근 허용', async () => {
@@ -232,6 +233,22 @@ await check('기상 대본 캐시(wake_scripts): RLS 켜짐, 앱(anon · authent
     (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
   return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && !x.client_update && x.server_read && x.server_insert
     && x.on_delete === 'c' && /'AW'/.test(x.point_check) && /'AV'/.test(x.point_check) && /'LV'/.test(x.point_check) ? true : x;
+});
+
+await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정을 지우면 같이 지워짐 · 월요일만 · 잠금 함수는 서버만 · ai_calls에 WS 지점', async () => {
+  const [x] = await q(`select
+    (select relrowsecurity from pg_class where oid='public.weekly_summaries'::regclass) as rls,
+    has_table_privilege('anon', 'public.weekly_summaries', 'select') as anon_read,
+    has_table_privilege('authenticated', 'public.weekly_summaries', 'select') as client_read,
+    has_table_privilege('authenticated', 'public.weekly_summaries', 'insert') as client_insert,
+    has_table_privilege('service_role', 'public.weekly_summaries', 'insert') as server_insert,
+    (select confdeltype from pg_constraint where conname = 'weekly_summaries_user_id_fkey') as on_delete,
+    (select count(*) from pg_constraint where conname = 'weekly_summaries_monday') as monday,
+    has_function_privilege('authenticated', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as client_claim,
+    has_function_privilege('service_role', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as server_claim,
+    (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
+  return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && x.server_insert
+    && x.on_delete === 'c' && Number(x.monday) === 1 && !x.client_claim && x.server_claim && /'WS'/.test(x.point_check) && /'AW'/.test(x.point_check) ? true : x;
 });
 
 await check('기기 키(briefing_devices): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정(profiles)을 지우면 같이 지워짐, 해시 모양만 · 해시 겹침 없음', async () => {
