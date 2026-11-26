@@ -125,7 +125,7 @@ function Wheel({ label, options, value, onChange, loop = false }: WheelProps) {
             <Pressable key={index} style={styles.item} onPress={() => choose(index)}
               accessibilityLabel={label + ' ' + item} accessibilityRole="button" accessibilityState={{ selected: distance === 0 }}>
               <Text variant="compare" weight={distance === 0 ? 600 : 400} tone={distance === 0 ? 'ink' : 'faint'}
-                style={[styles.number, distance > 1 && styles.outer]}>
+                style={distance > 1 ? styles.outer : undefined}>
                 {item}
               </Text>
             </Pressable>
@@ -155,10 +155,10 @@ export function AlarmWheelPicker({ value, onChange }: { value: Date; onChange: (
   return (
     <View style={styles.wrap}>
       <View pointerEvents="none" style={styles.selection} />
+      <Wheel label="오전 오후" options={PERIODS} value={hour >= 12 ? 1 : 0} onChange={(i) => update('period', i)} />
       <Wheel label="시" options={HOURS} value={(hour % 12 || 12) - 1} loop onChange={(i) => update('hour', i)} />
       <View pointerEvents="none" style={styles.separator}><Text variant="compare">:</Text></View>
       <Wheel label="분" options={MINUTES} value={minute % 60} loop onChange={(i) => update('minute', i)} />
-      <Wheel label="오전 오후" options={PERIODS} value={hour >= 12 ? 1 : 0} onChange={(i) => update('period', i)} />
     </View>
   );
 }
@@ -170,7 +170,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingVertical: PAD },
   item: { height: ROW, alignItems: 'center', justifyContent: 'center' },
-  number: { fontSize: 27, lineHeight: 36 },
-  outer: { opacity: 0.58, fontSize: 23 },
+  outer: { opacity: 0.58 },
   separator: { width: 12, alignItems: 'center' },
 });
