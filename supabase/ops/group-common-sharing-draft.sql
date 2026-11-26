@@ -54,6 +54,8 @@ declare r private.group_share_rules%rowtype;
 begin
  select * into r from private.group_share_rules where group_id=g;
  if not found then return; end if;
+ -- Serialize rule refresh with membership changes. Lock in a deterministic order.
+ perform 1 from public.group_members m where m.group_id=g and m.invite_status='JOINED' order by m.user_id for update;
  update public.group_members m set
   wake_share_opt_in=r.view_wake and private.group_rule_accepted(g,m.user_id),
   trip_share_opt_in=r.view_trip and private.group_rule_accepted(g,m.user_id)
@@ -110,6 +112,10 @@ begin
  return new;
 end $$;
 update public.sharing_permissions set can_view_alarm=false,can_edit_alarm=false where source_type='FRIEND';
+-- Prevent individual deletion of materialized group grants. Withdrawal uses the RPC.
+alter policy sharing_permissions_delete_owner on public.sharing_permissions
+ using (owner_id=(select auth.uid()) and source_type='FRIEND');
+
 create or replace function private.granted_owner_ids_for(p_grantee_id uuid,p_kind text) returns setof uuid language sql stable security definer set search_path='' as $$
  select sp.owner_id from public.sharing_permissions sp
  where sp.grantee_id=p_grantee_id and sp.source_type='GROUP'
@@ -125,7 +131,9 @@ create or replace function private.can_see_wake(p_viewer uuid,p_owner uuid,p_gro
 $$;
 -- Old RPC must not mutate group grants independently.
 create or replace function public.save_group_permissions(p_group_id uuid,p_can_view_alarm boolean,p_can_edit_alarm boolean) returns jsonb language plpgsql security definer set search_path='' as $$
-begin return jsonb_build_object('status','RULE_REQUIRED'); end $$;
+begin
+ if auth.uid() is null then raise exception 'Login required' using errcode='42501'; end if;
+ return jsonb_build_object('status','RULE_REQUIRED'); end $;
 
 create function private.group_rule_json(g uuid,u uuid) returns jsonb language sql stable security definer set search_path='' as $$
  select jsonb_build_object('status','OK','version',r.version,'viewAlarm',r.view_alarm,'editAlarm',r.edit_alarm,'viewWake',r.view_wake,'viewTrip',r.view_trip,
@@ -155,6 +163,7 @@ begin
  if not exists(select 1 from public.group_members where group_id=p_group_id and user_id=u and invite_status='JOINED') then return jsonb_build_object('status','NOT_FOUND'); end if;
  select * into r from private.group_share_rules where group_id=p_group_id;
  if r.version is distinct from p_version then return jsonb_build_object('status','RULE_CHANGED'); end if;
+ if not found then return jsonb_build_object('status','NOT_FOUND'); end if;
  if (r.view_alarm,r.edit_alarm,r.view_wake,r.view_trip) is distinct from (coalesce(p_view_alarm,false) or coalesce(p_edit_alarm,false),coalesce(p_edit_alarm,false),coalesce(p_view_wake,false),coalesce(p_view_wake,false) and coalesce(p_view_trip,false)) then
    update private.group_share_rules set version=gen_random_uuid(),view_alarm=coalesce(p_view_alarm,false) or coalesce(p_edit_alarm,false),edit_alarm=coalesce(p_edit_alarm,false),view_wake=coalesce(p_view_wake,false),view_trip=coalesce(p_view_wake,false) and coalesce(p_view_trip,false) where group_id=p_group_id returning * into r;
  end if;
@@ -198,6 +207,7 @@ begin
  select 1 from public.sharing_permissions s where s.owner_id=p_user_id and s.grantee_id=u and s.source_type='FRIEND' and s.can_view_wake and private.is_valid_permission_source(s.owner_id,s.grantee_id,s.source_type,s.source_id))
  or exists(select 1 from public.wake_hides h where h.owner_id=p_user_id and h.hidden_from_id=u) then return jsonb_build_object('status','NOT_SHARED'); end if;
  select coalesce(timezone,'Asia/Seoul') into tz from public.profiles where user_id=p_user_id;
+ tz:=coalesce(tz,'Asia/Seoul');
  select min(e.event_at) into at_time from public.alarm_events e
  where e.user_id=p_user_id and e.event_type='WAKE_CONFIRMED'
  and private.life_day(e.event_at,tz)=private.life_day(now(),tz)
