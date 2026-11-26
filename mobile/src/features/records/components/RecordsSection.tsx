@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, Loading, SectionHeader, Segmented, Text, Timeline, toast, type TimelineItem } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { dayRelative } from '@/features/records/calendar';
+import { dayRelative, weekStart } from '@/features/records/calendar';
 import { CalendarHeader } from '@/features/records/components/CalendarHeader';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
 import { ScoreBars } from '@/features/records/components/ScoreBars';
@@ -144,7 +144,7 @@ function WeekDigest({ today, onPressDay, register }: { today: Date; onPressDay: 
           </View>
         </View>
       ) : null}
-      {data.journalDays ? <WeekAi period={today} journalDays={data.journalDays} relative={data.relative} compact /> : null}
+      {data.journalDays ? <WeekAi key={dayKey(weekStart(today))} period={today} journalDays={data.journalDays} relative={data.relative} compact /> : null}
       {!s && !data.journalDays ? (
         <Text variant="body" tone="sub" style={styles.digestEmpty}>
           {emptyText}
@@ -220,7 +220,8 @@ function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps
     <>
       <WeekStrip record={data} onPrev={onPrev} onNext={onNext} onPressDay={onPressDay} />
       {data.summary ? <WeekSummaryCards summary={data.summary} onPressDay={onPressDay} /> : null}
-      {data.journalDays ? <WeekAi period={period} journalDays={data.journalDays} relative={data.relative} /> : null}
+      {/* key = 주 — 주를 넘기면 새로 그려서, 다시 읽는 동안 · 실패했을 때 앞 주 글이 새 주 이름 아래 남지 않게 (useLoad는 앞 data를 남김) */}
+      {data.journalDays ? <WeekAi key={dayKey(weekStart(period))} period={period} journalDays={data.journalDays} relative={data.relative} /> : null}
       {!data.summary && !data.journalDays ? (
         <Card>
           <Text variant="body" tone="sub">
