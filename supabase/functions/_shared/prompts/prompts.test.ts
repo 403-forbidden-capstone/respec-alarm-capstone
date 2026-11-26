@@ -21,10 +21,12 @@ const LEDGER: Record<string, string> = {
   'T1.v1.4': 'T1@v1.4#1413d56c', // 서버에서 한 줄 더한 판(영어 입력 규칙) — 실험실 장부에는 없음
   'T1.v1.5': 'T1@v1.5#a32f3f75', // 서버에서 더한 판 — 실험실 장부에 없음
   'T1.v1.6': 'T1@v1.6#d61e0019', // v1.5 + 하루 기록 선택 질문(FOLLOW_UP) · 넘기기 · 끝내기 신호 — 실험실 장부에 없음
+  'T1.v1.7': 'T1@v1.7#d46ebace', // v1.6 + 한국어 답에 외국 글자 섞지 않기 · 이름은 사용자가 쓴 글자 그대로 ('캡스톤' → '캡ス톤') — 실험실 장부에 없음
   'T2.v2': 'T2@v2#d5dff11c',
   'T2.v3': 'T2@v3#48979e16', // 서버에서 더한 판(대화 끝 정리 칸) — 실험실 장부에 없음
   'T2.v3.2': 'T2@v3.2#873687fa', // v3.1 + 감정 원인은 직접 이어 말한 것만 · 짐작한 습관은 inferred (11/8 실제 호출)
   'T2.v3.3': 'T2@v3.3#93fd2581', // v3.2 + 지난 일 · 목표는 준비시간 변경이 아님 · 목표의 습관은 직접 말했을 때만 (11/8 음성 실제 호출)
+  'T2.v3.4': 'T2@v3.4#036cd907', // v3.3 + 이름은 사용자가 쓴 글자 그대로 · 외국 글자 섞지 않기 — 실험실 장부에 없음
   'T2.v3.1': 'T2@v3.1#c152792e', // v3 + 피로 · 스트레스는 숫자로 말했을 때만 (11/8 실제 호출에서 '너무 피곤해' → 4)
   'T2F.v2-a': 'T2F@v2-a#d2c172e5',
   'T2F.v2-b': 'T2F@v2-b#a3a350f2', // 서버에서 더한 판
@@ -33,6 +35,7 @@ const LEDGER: Record<string, string> = {
   'T2F.v2-e': 'T2F@v2-e#a6814d54', // 서버에서 더한 판: v2-d + 나가기 전 할 일(pre_tasks) · 기상 답(wake_reply), extract-fast.v3 (11/19 팀 결정) — 실험실 장부에 없음
   'T2F.v2-f': 'T2F@v2-f#a324e2d6', // 서버에서 더한 판: v2-e + 알람 상대 변경 분(alarm_changes.shift), extract-fast.v4 (#625) — 실험실 장부에 없음
   'T2F.v2-g': 'T2F@v2-g#468ba1c8', // 서버에서 더한 판: v2-f + 요청 나누기 · 기본 알람 만들기(alarm_new), extract-fast.v5 — 실험실 장부에 없음
+  'T2F.v2-h': 'T2F@v2-h#16edccaa', // 서버에서 더한 판: v2-g + 이름은 사용자가 쓴 글자 그대로 · 외국 글자 섞지 않기 — 실험실 장부에 없음
   'T4.v1.1': 'T4@v1.1#b597fc65',
   'T5.v1.2': 'T5@v1.2#d792df8d',
   'T5.v2': 'T5@v2#abf0a650', // 서버에서 더한 판(구조화 JSON → 1~2문장 일기) — 실험실 장부에 없음
@@ -42,13 +45,13 @@ const LEDGER: Record<string, string> = {
 };
 
 // 지점이 더는 안 쓰는 옛 판 (파일은 남김 — index.ts 머리 주석 2번)
-const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2F.v2-c', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2', 'T5.v1.2', 'T1.v1.5', 'T5.v2', 'T2F.v2-d', 'T2F.v2-e', 'T2F.v2-f'];
+const SUPERSEDED = ['T1.v1.3', 'T1.v1.4', 'T2F.v2-a', 'T2F.v2-b', 'T2F.v2-c', 'T2.v2', 'T2.v3', 'T2.v3.1', 'T2.v3.2', 'T5.v1.2', 'T1.v1.5', 'T5.v2', 'T2F.v2-d', 'T2F.v2-e', 'T2F.v2-f', 'T1.v1.6', 'T2F.v2-g', 'T2.v3.3'];
 
 // 지점 → 파일 이름
 const FILE_OF: Record<PointId, string> = {
-  T1: 'T1.v1.6',
-  T2F: 'T2F.v2-g',
-  T2: 'T2.v3.3',
+  T1: 'T1.v1.7',
+  T2F: 'T2F.v2-h',
+  T2: 'T2.v3.4',
   T3: 'T3.v1',
   T4: 'T4.v1.1',
   T5: 'T5.v3',
@@ -158,9 +161,9 @@ describe('지점 설정(index.ts)', () => {
       const c = POINTS[p];
       return [c.prompt.id, c.prompt.version, c.schema, c.effort, c.maxTokens, c.thinking?.type ?? null, c.timeoutMs, c.retryOnTimeout];
     };
-    assert.deepEqual(row('T1'), ['T1', 'v1.6', 't1-reply.v1', 'low', 2048, null, 20_000, true]);
-    assert.deepEqual(row('T2F'), ['T2F', 'v2-g', 'extract-fast.v5', 'low', 4096, 'adaptive', 15_000, false]);
-    assert.deepEqual(row('T2'), ['T2', 'v3.3', 'extract.v2', 'medium', 4096, null, 19_000, true]);
+    assert.deepEqual(row('T1'), ['T1', 'v1.7', 't1-reply.v1', 'low', 2048, null, 20_000, true]);
+    assert.deepEqual(row('T2F'), ['T2F', 'v2-h', 'extract-fast.v5', 'low', 4096, 'adaptive', 15_000, false]);
+    assert.deepEqual(row('T2'), ['T2', 'v3.4', 'extract.v2', 'medium', 4096, null, 19_000, true]);
     assert.deepEqual(row('T3'), ['T3', 'v1', 't3-reason.v1', 'low', 1024, null, 4_000, true]);
     assert.deepEqual(row('T4'), ['T4', 'v1.1', 't4-diary.v1', 'medium', 4096, null, 11_000, true]);
     assert.deepEqual(row('T5'), ['T5', 'v3', 't4-diary.v1', 'low', 1024, null, 9_000, false]);

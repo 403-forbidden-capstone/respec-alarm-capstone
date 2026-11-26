@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
 
 import { HttpError } from '../errors.ts';
 import {
-  callLlm, FAIL_MESSAGES, LlmClientError, llmClientFrom, retryDelayMs, toHttpError,
+  callLlm, FAIL_MESSAGES, LlmClientError, llmClientFrom, retryDelayMs, fixStray, STRAY_FIXED_FLAG, STRAY_FLAG, toHttpError,
   type CallOpts, type LlmClient, type LlmFailure, type LlmRequest, type LlmResponse, type LlmResult,
 } from './llm.ts';
 import { render, templateVars } from './render.ts';
@@ -756,7 +756,7 @@ describe('call 기록 — ai_calls 표 칸과 같은 이름', () => {
     assert.deepEqual([...POINT_IDS].sort(), [...POINT_CHECK].sort());
     assert.deepEqual(
       Object.fromEntries(POINT_IDS.map((p) => [p, `${POINTS[p].prompt.id}@${POINTS[p].prompt.version}`])),
-      { T1: 'T1@v1.6', T2F: 'T2F@v2-g', T2: 'T2@v3.3', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v3', E4: 'ASSIST_E4@v1.1' },
+      { T1: 'T1@v1.7', T2F: 'T2F@v2-h', T2: 'T2@v3.4', T3: 'T3@v1', T4: 'T4@v1.1', T5: 'T5@v3', E4: 'ASSIST_E4@v1.1' },
     );
   });
 
@@ -797,5 +797,95 @@ describe('callPoint', () => {
     const t = setup([response([text(T1_OK)])]);
     await callPoint(t.client, 'T1', dummyVars('T1'), t.extra);
     assert.equal(t.calls[0].params.model, 'claude-haiku-5-5');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 입력에 없는 외국 글자 ("캡스톤 회의" → "캡ス톤 회의") — 다시 만들기 1번, 또 섞이면 BAD_OUTPUT
+// ---------------------------------------------------------------------------
+
+describe('외국 글자 섞임', () => {
+  const user = '내일 11시에 캡스톤 회의가 있어';
+  const t1 = (reply: string) => JSON.stringify({ reply, acts: [], end: false });
+  const fix = (title: string, source: string) => {
+    const r = fixStray({ title }, source);
+    return { title: (r.data as { title: string }).title, left: r.left, fixed: r.fixed };
+  };
+
+  it('끼인 외국 글자는 원문의 낱말로 고침 ("캡ス톤" → "캡스톤")', () => {
+    assert.deepEqual(fix('캡ス톤 회의', user), { title: '캡스톤 회의', left: [], fixed: 1 });
+  });
+  it('사용자가 쓴 외국어 · 컨텍스트(DB)에 있는 외국어 이름 · 영어 · 나열 점은 그대로', () => {
+    assert.deepEqual(fix('スタバ에서 모임 · Starbucks', '내일 スタバ에서 모임 Starbucks'), { title: 'スタバ에서 모임 · Starbucks', left: [], fixed: 0 });
+    const ctx = '[a1] 11/27 10:00 東京駅 미팅 · 장소 Шоколадница\n사용자: 東京駅 미팅 1시간 미뤄줘';
+    assert.deepEqual(fix('東京駅 미팅 · Шоколадница', ctx), { title: '東京駅 미팅 · Шоколадница', left: [], fixed: 0 });
+    assert.deepEqual(fix('가・나', user), { title: '가・나', left: [], fixed: 0 });
+    assert.deepEqual(fix('캡스톤 회의', user), { title: '캡스톤 회의', left: [], fixed: 0 });
+  });
+  it('받아쓰기가 깨진 말("캡ス톤")은 컨텍스트에 맞는 이름이 있으면 그걸로 고침', () => {
+    assert.deepEqual(fix('캡ス톤 회의', '[a1] 캡스톤 회의\n사용자: 캡ス톤 회의 11시로'), { title: '캡스톤 회의', left: [], fixed: 1 });
+  });
+  it('조사 · 문장부호가 붙어도 끼인 덩어리만 고침', () => {
+    assert.deepEqual(fix('캡ス톤에서 봐요', user), { title: '캡스톤에서 봐요', left: [], fixed: 1 });
+    assert.deepEqual(fix('캡ス톤, 회의', user), { title: '캡스톤, 회의', left: [], fixed: 1 });
+  });
+  it('못 고쳐도 원문에 글자 그대로 있는 낱말(이미 저장된 깨진 이름 · 받아쓰기)은 그대로 둠 — 매번 실패하지 않게', () => {
+    assert.deepEqual(fix('캡ス톤 회의는 내일 11시예요', '[기존 일정]\n- 캡ス톤 회의\n사용자: 내일 회의 몇 시?'), { title: '캡ス톤 회의는 내일 11시예요', left: [], fixed: 0 });
+    assert.deepEqual(fix('캡ス톤 회의', '사용자: 캡ス톤 회의 있어'), { title: '캡ス톤 회의', left: [], fixed: 0 });
+    const db = '[기존 일정]\n- 캡ス톤 회의\n사용자: 내일 회의 몇 시?';
+    for (const s of ["'캡ス톤 회의' 11시예요", '"캡ス톤 회의"', '(캡ス톤 회의)', '캡ス톤에서 봐요']) assert.deepEqual(fix(s, db), { title: s, left: [], fixed: 0 }, s);
+  });
+  it('원문에 맞는 낱말이 없거나 끝에 붙으면 못 고침 (다시 만들기로)', () => {
+    assert.deepEqual(fix('會議', user).left, ['會', '議']);
+    assert.deepEqual(fix('회의ス', user).left, ['ス']);
+  });
+
+  it('고칠 수 있으면 다시 부르지 않고 고친 값 + 표시', async () => {
+    const t = setup([response([text(t1('캡ス톤 회의 잡을게요.'))])]);
+    const r = await callLlm<{ reply: string }>(t.client, baseOpts({ user, now: t.extra.now }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(r.data.reply, '캡스톤 회의 잡을게요.');
+    assert.equal(t.calls.length, 1);
+    assert.deepEqual(r.call.flags, [STRAY_FIXED_FLAG]);
+  });
+
+  it('못 고치면 다시 만들어 고친 답을 씀 — 시도 · 시간은 합쳐 기록', async () => {
+    const t = setup([response([text(t1('會議 잡을게요.'))]), response([text(t1('회의 잡을게요.'))])]);
+    const r = await callLlm<{ reply: string }>(t.client, baseOpts({ user, now: t.extra.now, deadlineMs: 60_000 }));
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(r.data.reply, '회의 잡을게요.');
+    assert.equal(t.calls.length, 2);
+    assert.equal(r.call.attempts, 2);
+    assert.equal(r.call.latency_ms, 200);
+    assert.ok(r.call.flags.includes(STRAY_FLAG));
+  });
+
+  it('다시 만들어도 섞이면 BAD_OUTPUT (카드 · 저장으로 안 감)', async () => {
+    const t = setup([response([text(t1('會議'))]), response([text(t1('會議'))])]);
+    const f = mustFail(await callLlm(t.client, baseOpts({ user, now: t.extra.now, deadlineMs: 60_000 })));
+    assert.equal(f.code, 'BAD_OUTPUT');
+    assert.equal(t.calls.length, 2);
+  });
+
+  it('마감이 없는 호출(T2 · T5 등)은 다시 만들지 않고 바로 실패 길로 — 최악 시간이 두 배가 되지 않게', async () => {
+    const t = setup([response([text(t1('會議'))])]);
+    const f = mustFail(await callLlm(t.client, baseOpts({ user, now: t.extra.now })));
+    assert.equal(f.code, 'BAD_OUTPUT');
+    assert.equal(t.calls.length, 1);
+  });
+
+  it('마감이 모자라면 다시 만들지 않음', async () => {
+    const t = setup([response([text(t1('會議'))])]);
+    const f = mustFail(await callLlm(t.client, baseOpts({ user, now: t.extra.now, deadlineMs: 150 })));
+    assert.equal(f.code, 'BAD_OUTPUT');
+    assert.equal(t.calls.length, 1);
+  });
+
+  it('사진을 읽는 호출은 보지 않음 (시간표 한자 과목명)', async () => {
+    const t = setup([response([text(t1('會議'))])]);
+    const r = await callLlm(t.client, baseOpts({ user, now: t.extra.now, images: [{ media_type: 'image/png', data: 'AA==' }] }));
+    assert.equal(r.ok, true);
   });
 });

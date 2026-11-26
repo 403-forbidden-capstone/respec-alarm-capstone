@@ -311,7 +311,7 @@ async function attemptOnce(client: LlmClient, request: LlmRequest, timeoutMs: nu
   }
 }
 
-export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallOpts): Promise<LlmResult<T>> {
+async function callOnce<T>(client: LlmClient | null, opts: CallOpts): Promise<LlmResult<T>> {
   const now = opts.now ?? (() => performance.now());
   const sleep = opts.sleep ?? defaultSleep;
 
@@ -400,8 +400,104 @@ export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallO
   const data = fromApiOutput(opts.schema, parsed);
   const checked = validate(opts.schema, data);
   if (!checked.valid) return fail('BAD_OUTPUT', `스키마: ${checked.errors.slice(0, 5).join(' / ')}${checked.errors.length > 5 ? ` 외 ${checked.errors.length - 5}건` : ''}`, done);
+  // 사진을 읽는 지점(시간표 — 한자 과목명 가능)은 원문이 글이 아니라 안 봄
+  const fixed = opts.images?.length ? { data, left: [], fixed: 0 } : fixStray(data, opts.user);
+  if (fixed.left.length > 0) return fail('BAD_OUTPUT', `입력에 없는 외국 글자가 섞임: ${fixed.left.join(' ')}`, { ...done, flags: [STRAY_FLAG] });
 
-  return { ok: true, data: data as T, call: makeCall(opts, { ok: true, error_code: null, ...done, response }) };
+  const call = makeCall(opts, { ok: true, error_code: null, ...done, response });
+  if (fixed.fixed > 0) call.flags = [STRAY_FIXED_FLAG];
+  return { ok: true, data: fixed.data as T, call };
+}
+
+// 한국어 답 · 이름에 섞이면 안 되는 글자: 가나 · 한자 · 키릴 · 태국 · 아랍 · 데바나가리 ("캡스톤" → "캡ス톤", Gemini Flash-Lite).
+// 라틴(영어)은 약어 · 사용자가 쓴 이름에 흔해서 안 봄. 사용자가 직접 쓴 글자(입력 글에 있는 글자)는 의도한 것이라 허용
+// 가타카나 가운뎃점(U+30FB '・')은 나열 기호로도 써서 뺌
+const FOREIGN_SCRIPT = /[\u0400-\u04ff\u0600-\u06ff\u0900-\u097f\u0e00-\u0e7f\u3040-\u30fa\u30fc-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/g;
+export const STRAY_FLAG = 'stray_script';
+export const STRAY_FIXED_FLAG = 'stray_script_fixed';
+
+// 외국 글자 덩어리, 그리고 한글 사이에 끼인 덩어리("캡ス톤") — 끼인 것은 받아쓰기 · 모델 오류로 봄. 일부러 쓴 외국 이름은
+// 낱말 통째("スタバ에서")라 안 끼임
+const FOREIGN_RUN = new RegExp(`${FOREIGN_SCRIPT.source}+`, 'g');
+const isHangul = (c: string | undefined): boolean => c !== undefined && c >= '가' && c <= '힣';
+const sandwiched = (s: string, at: number, len: number): boolean => isHangul(s[at - 1]) && isHangul(s[at + len]);
+
+/**
+ * 출력(JSON) 글 칸의 섞인 외국 글자를 원문(source = 사용자 말 + 컨텍스트의 DB 이름)으로 고친다.
+ * 허용: 원문에 있는 외국 글자(사용자가 쓴 이름 · DB에 있는 외국어 이름), 단 한글 사이에 끼인 것은 늘 섞임.
+ * 고치기: 끼인 덩어리 앞뒤 한글 줄기로 만든 틀("캡[가-힣]톤에서" → "캡[가-힣]톤에" → "캡[가-힣]톤")이 원문에서 한 가지 글자로만
+ *   맞으면 그 덩어리만 바꿈 (뒤에 붙은 조사 · 문장부호는 출력 그대로). 끝에 붙은 것("회의ス")은 틀이 엉뚱하게 맞을 수 있어 안 고침.
+ * 못 고쳐도 끼인 덩어리가 원문에 앞뒤 글자까지 그대로 있으면(이미 DB에 저장된 깨진 이름 · 바른 이름이 없는 받아쓰기 오류를 옮김)
+ *   그대로 둠 — 막으면 그 이름이 나올 때마다 실패.
+ * left = 못 고친 글자 (있으면 다시 만들기 · 실패)
+ */
+export function fixStray(data: unknown, source: string): { data: unknown; left: string[]; fixed: number } {
+  const allowed = new Set<string>();
+  for (const m of source.matchAll(FOREIGN_RUN)) if (!sandwiched(source, m.index, m[0].length)) for (const c of m[0]) allowed.add(c);
+  const left = new Set<string>();
+  let fixed = 0;
+  const fixRun = (run: string, before: string, after: string): string | null => {
+    for (let n = after.length; n >= 1; n--) {
+      const hits = new Set([...source.matchAll(new RegExp(`${before}([가-힣]{${run.length}})${after.slice(0, n)}`, 'g'))].map((m) => m[1]));
+      if (hits.size === 1) return [...hits][0];
+      if (hits.size > 1) return null; // 줄기를 더 줄이면 더 여럿이 맞음
+    }
+    return null;
+  };
+  const fixString = (s: string): string =>
+    s.replace(/\S+/g, (word) => {
+      let failed = false;
+      let runs = 0;
+      const out = word.replace(FOREIGN_RUN, (run: string, at: number) => {
+        const inside = sandwiched(word, at, run.length);
+        if (!inside && [...run].every((c) => allowed.has(c))) return run;
+        if (!inside) {
+          failed = true;
+          return run;
+        }
+        const before = /[가-힣]+$/.exec(word.slice(0, at))![0];
+        const after = /^[가-힣]+/.exec(word.slice(at + run.length))![0];
+        const to = fixRun(run, before, after);
+        if (to !== null) {
+          runs++;
+          return to;
+        }
+        // 못 고쳐도 원문에 글자 그대로 있는 덩어리(이미 저장된 깨진 이름 · 받아쓰기 그대로)는 둠 — 따옴표 · 조사가 붙어도
+        if (!source.includes(before + run + after[0])) failed = true;
+        return run;
+      });
+      if (!failed) {
+        fixed += runs;
+        return out;
+      }
+      for (const c of word.match(FOREIGN_SCRIPT) ?? []) left.add(c);
+      return word;
+    });
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return fixString(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  const out = walk(data);
+  return { data: out, left: [...left], fixed };
+}
+
+// 외국 글자가 섞인 답은 한 번 다시 만들게 함 — 마감(deadlineMs)이 있는 호출만, 남은 시간 안에서. 또 섞이면 BAD_OUTPUT — 카드 · DB로 가지 않음
+// 마감이 없는 호출(T2 · T5 · 기상 대본 · 주간 요약)은 다시 만들면 최악 시간이 두 배라(voice-commit 앱 45초) 바로 실패 길로
+export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallOpts): Promise<LlmResult<T>> {
+  const first = await callOnce<T>(client, opts);
+  if (first.ok || !first.call.flags.includes(STRAY_FLAG) || opts.deadlineMs === undefined) return first;
+  const left = opts.deadlineMs - first.call.latency_ms;
+  if (left < Math.min(opts.timeoutMs, RETRY_MIN_ATTEMPT_MS)) return first;
+  const second = await callOnce<T>(client, { ...opts, deadlineMs: left, timeoutMs: Math.min(opts.timeoutMs, left) });
+  // 호출 기록 한 줄에 두 번 모두 — 시간 · 횟수 · 비용을 더하고 다시 만든 표시
+  const c = second.call;
+  c.latency_ms += first.call.latency_ms;
+  c.attempts += first.call.attempts;
+  if (c.cost_usd !== null && first.call.cost_usd !== null) c.cost_usd += first.call.cost_usd;
+  c.flags = [...new Set([...c.flags, STRAY_FLAG])];
+  return second;
 }
 
 function makeCall(
