@@ -11,7 +11,7 @@ type PickerProps = {
   value: Date; // 고른 날짜의 그 시각
   onChange: (next: Date) => void; // 날짜는 그대로, 시 · 분만 바뀜
   error?: string; // 붉게 (예: 이미 지난 시각이에요)
-  minuteStep?: number; // 분 [−][+] 한 칸 (기본 1분, 새 알람 시트는 5분). 숫자를 눌러 적는 값은 1분 단위 그대로
+  minuteStep?: number; // 직접 입력 모드의 분 [−][+] 간격 (기본 1분). 휠은 항상 1분 단위
 };
 
 const AMPM = [
@@ -41,7 +41,6 @@ function DirectTimePicker({ value, onChange, minuteStep = 1 }: PickerProps) {
       <Segmented options={AMPM} value={pm ? 'pm' : 'am'} onChange={(v) => set(toHour24(hour12, v === 'pm'), minute)} />
       <Stepper first label="시" value={hour12} step={1} min={1} max={12} unit="시" wrap onChange={(h) => set(toHour24(h, pm), minute)} />
       <Stepper label="분" value={minute} step={minuteStep} min={0} max={59} unit="분" wrap typeExact onChange={(m) => set(hour, m)} />
-
     </>
   );
 }
