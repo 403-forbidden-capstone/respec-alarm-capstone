@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 
 import { Text } from '@/components/ui';
@@ -29,16 +29,16 @@ function Wheel({ label, options, value, onChange, loop = false }: WheelProps) {
   const count = options.length;
   const entries = loop ? [...options, ...options, ...options] : options;
   const middle = (index: number) => index + (loop ? count : 0);
-  const initial = useRef({ x: 0, y: middle(value) * ROW }).current;
+  const [initial] = useState(() => ({ x: 0, y: middle(value) * ROW }));
   const scroll = useRef<ScrollView>(null);
   const ready = useRef(false);
   const selected = useRef(middle(value));
   const logical = useRef(value);
   const offset = useRef(initial.y);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [active, setActive] = useState(selected.current);
+  const [active, setActive] = useState(() => middle(value));
   const change = useRef(onChange);
-  change.current = onChange;
+  useLayoutEffect(() => { change.current = onChange; }, [onChange]);
 
   const position = (index: number) => {
     selected.current = index;
@@ -147,7 +147,7 @@ export function changeWheelTime(value: Date, part: 'hour' | 'minute' | 'period',
 
 export function AlarmWheelPicker({ value, onChange }: { value: Date; onChange: (next: Date) => void }) {
   const latest = useRef(value);
-  latest.current = value;
+  useLayoutEffect(() => { latest.current = value; }, [value]);
   const minute = minuteOfDay(value);
   const hour = Math.floor(minute / 60);
   // 두 열을 빠르게 연달아 움직여도 직전에 선택한 다른 열의 값을 유지한다.
