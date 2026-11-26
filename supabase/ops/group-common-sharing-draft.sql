@@ -133,7 +133,7 @@ $$;
 create or replace function public.save_group_permissions(p_group_id uuid,p_can_view_alarm boolean,p_can_edit_alarm boolean) returns jsonb language plpgsql security definer set search_path='' as $$
 begin
  if auth.uid() is null then raise exception 'Login required' using errcode='42501'; end if;
- return jsonb_build_object('status','RULE_REQUIRED'); end $;
+ return jsonb_build_object('status','RULE_REQUIRED'); end $$;
 
 create function private.group_rule_json(g uuid,u uuid) returns jsonb language sql stable security definer set search_path='' as $$
  select jsonb_build_object('status','OK','version',r.version,'viewAlarm',r.view_alarm,'editAlarm',r.edit_alarm,'viewWake',r.view_wake,'viewTrip',r.view_trip,
@@ -162,8 +162,8 @@ begin
  perform private.lock_group(p_group_id);
  if not exists(select 1 from public.group_members where group_id=p_group_id and user_id=u and invite_status='JOINED') then return jsonb_build_object('status','NOT_FOUND'); end if;
  select * into r from private.group_share_rules where group_id=p_group_id;
- if r.version is distinct from p_version then return jsonb_build_object('status','RULE_CHANGED'); end if;
  if not found then return jsonb_build_object('status','NOT_FOUND'); end if;
+ if p_version is null or r.version is distinct from p_version then return jsonb_build_object('status','RULE_CHANGED'); end if;
  if (r.view_alarm,r.edit_alarm,r.view_wake,r.view_trip) is distinct from (coalesce(p_view_alarm,false) or coalesce(p_edit_alarm,false),coalesce(p_edit_alarm,false),coalesce(p_view_wake,false),coalesce(p_view_wake,false) and coalesce(p_view_trip,false)) then
    update private.group_share_rules set version=gen_random_uuid(),view_alarm=coalesce(p_view_alarm,false) or coalesce(p_edit_alarm,false),edit_alarm=coalesce(p_edit_alarm,false),view_wake=coalesce(p_view_wake,false),view_trip=coalesce(p_view_wake,false) and coalesce(p_view_trip,false) where group_id=p_group_id returning * into r;
  end if;
@@ -190,11 +190,11 @@ begin
  if (p_group_id is null)=(p_code is null) then return jsonb_build_object('status','NOT_FOUND'); end if;
  if p_code is not null then result:=public.join_group(p_code,false);
  else result:=public.accept_group_invite(p_group_id,false); end if;
- if result->>'status' not in ('JOINED','ALREADY_JOINED') then return result; end if;
+ if coalesce(result->>'status','') not in ('JOINED','ALREADY_JOINED') then return result; end if;
  g:=(result->>'group_id')::uuid;
  perform private.lock_group(g);
  select version into v from private.group_share_rules where group_id=g;
- if v is distinct from p_version then raise exception 'RULE_CHANGED' using errcode='P0001'; end if;
+ if v is null or p_version is null or v is distinct from p_version then raise exception 'RULE_CHANGED' using errcode='P0001'; end if;
  insert into private.group_share_consents values(g,u,v) on conflict(group_id,user_id) do update set version=excluded.version;
  perform private.refresh_common_group_rule(g);
  return result;
