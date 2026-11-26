@@ -12,7 +12,7 @@ import {
   isApplicableValue,
   isPlanned,
   isUuid,
-  latestCoaching,
+  hasJournalText,
   plannedRow,
   SUGGESTION_REASON,
   toSuggestion,
@@ -85,17 +85,14 @@ describe('wakeRowsOf — 주간 요약에 넣을 날', () => {
   });
 });
 
-describe('latestCoaching — 그 주 AI 코칭', () => {
-  it('가장 최근 일기의 코칭, 비었으면 빈 글자', () => {
-    expect(
-      latestCoaching([
-        { record_date: '2026-10-19', coaching_insight: '월요일 코칭' },
-        { record_date: '2026-10-21', coaching_insight: '  수요일 코칭 ' },
-        { record_date: '2026-10-22', coaching_insight: '' },
-      ]),
-    ).toBe('수요일 코칭');
-    expect(latestCoaching([])).toBe('');
-    expect(latestCoaching([{ record_date: '2026-10-19', coaching_insight: null }])).toBe('');
+describe('hasJournalText — 주간 AI 요약에 쓰는 일기', () => {
+  const j = (patch: Partial<{ ai_summary: string | null; edited_summary: string | null; is_edited: boolean }>) => ({ record_date: '2026-10-19', ai_summary: null, edited_summary: null, is_edited: false, ...patch });
+  it('보여 주는 글(고쳤으면 고친 글)이 비지 않은 날만', () => {
+    expect(hasJournalText(j({ ai_summary: '팀플 회의' }))).toBe(true);
+    expect(hasJournalText(j({ ai_summary: '  ' }))).toBe(false);
+    expect(hasJournalText(j({}))).toBe(false);
+    expect(hasJournalText(j({ ai_summary: 'AI', edited_summary: ' ', is_edited: true }))).toBe(false); // 고쳐서 비움
+    expect(hasJournalText(j({ ai_summary: null, edited_summary: '직접 쓴 글', is_edited: true }))).toBe(true);
   });
 });
 

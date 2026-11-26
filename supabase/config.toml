@@ -493,3 +493,7 @@ verify_jwt = false
 # L9 시간표 채우기 — 사진(base64) → Claude → 수업 줄. 앱이 로그인 토큰으로 부름
 [functions.timetable-extract]
 verify_jwt = true
+
+# R02 주간 AI 요약 — 그 주 일기로 Gemini 한 번, weekly_summaries 캐시. 앱이 로그인 토큰으로 부름
+[functions.weekly-summary]
+verify_jwt = true

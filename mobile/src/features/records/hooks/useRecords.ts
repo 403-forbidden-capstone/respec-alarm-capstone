@@ -1,4 +1,4 @@
-import { getDay, getMonth, getWeek, recordToday, weekEmptyText } from '@/features/records/api';
+import { getDay, getMonth, getWeek, getWeekAiSummary, recordToday, weekEmptyText } from '@/features/records/api';
 import { weekStart } from '@/features/records/calendar';
 import { dayKey } from '@/lib/format';
 
@@ -15,6 +15,12 @@ export function useMonthRecord(year: number, month: number) {
 export function useWeekRecord(period: Date) {
   const result = useLoadOn(() => getWeek(period), dayKey(weekStart(period)));
   return { ...result, emptyText: result.data ? weekEmptyText(result.data) : null };
+}
+
+// 주간 AI 요약 — 일기가 있는 주에서만 부름(부르는 쪽이 journalDays > 0일 때만 그림). 일기 수가 바뀌면(당겨서 새로고침) 다시 읽음,
+//   일기를 고치고 돌아오면 화면 들어올 때 다시 읽음(useLoad) — 기록이 그대로면 서버가 모델을 다시 안 부름
+export function useWeekAiSummary(period: Date, journalDays: number) {
+  return useLoadOn(() => getWeekAiSummary(period), `${dayKey(weekStart(period))}:${journalDays}`);
 }
 
 export function useDayRecord(day: Date) {

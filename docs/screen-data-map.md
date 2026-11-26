@@ -100,7 +100,7 @@
 
 ### H01 홈
 - 다음 알람은 흐름 카드 — 약속 이름 · 큰 시각 · 기상 → 준비 → 출발 → 일정 점 줄(일정 없는 알람은 '일정' 점 없음). 그룹 약속이면 아래에 같이 준비하는 사람 줄: `listGroups` → 이름이 같은 그룹 → `getGroupSummary`(멤버 앞 글자 · 오늘 기상 수, 약속이 오늘이 아니면 그룹 이름만). 덧붙임 줄이라 못 읽으면 안 그림
-- 나의 기록은 접힌 요약(이번 주 `getWeek`: 날짜 줄 · 평균 기상 · 목표 기상률 · AI 코칭) 한 카드, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간(R02)
+- 나의 기록은 접힌 요약(이번 주 `getWeek`: 날짜 줄 · 평균 기상 · 목표 기상률 + `getWeekAiSummary`: AI 주간 요약) 한 카드, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간(R02)
 - 다음 알람: `alarms`(내 것, 켜짐, 지금 이후 가장 이른 것) → `appointment_participants` → `appointments`(제목 · 장소 · 시각) — DB. 루틴 알람이면 `participant_id`가 NULL이라 `routines.title`을 씀. 일정 없는 알람(D46)은 둘 다 NULL(#160) → 제목 "알람"
 - 오늘 일정(저녁엔 내일): `appointment_participants`(나) + `appointments.appointment_at` 날짜 — DB
 - 확인할 일 한 줄 (인사 바로 아래, 한 번에 하나): 약속이 바뀜(가짜 모드만) > 알람 조정 제안 `getPendingSuggestion` > 오늘 하루 기록 `getJournal` 순, 없으면 첫 일정 안내 줄. 못 읽으면 줄만 없음
@@ -263,6 +263,7 @@
 - 자리: 기록 탭이 없어지고 홈(H01) 맨 아래 "나의 기록" 구역 (D110). 데이터 · 날짜 이동은 아래 그대로
 - 월간: `daily_records`(그 달) — DB. 달력 점 "완료"(지난 날) = 기상 확인 `wake_confirmed_at` + 준비 실측 `actual_prepare_minutes` (출발 입력 때 `recordParticipantTimes`가 씀). 서버의 예상 준비시간 P80(`v_prepare_time_stats`)도 이 값을 읽음
 - 주간: `daily_records.wake_confirmed_at` + `appointment_participants.is_late` — DB → 평균 기상 · 목표 기상률은 앱에서 계산
+- 주간 AI 요약: `weekly-summary`(Edge) — 그 주 `daily_journals` 글(고쳤으면 고친 글)이 하루라도 있으면 Gemini 한 번, 기상 기록 · 알람과 상관없음. `weekly_summaries`에 주마다 저장 — 일기가 그대로면 저장된 글(모델 호출 없음), 추가 · 수정 · 삭제 때만 다시 만듦. 반영된 기록 일수 · 기간은 서버가 셈. 지난 주도 그대로 조회. 기상 통계도 일기도 없는 주만 "기록이 없어요"
 - 일간: 설정값 `alarms`(켜진 것만 — 일정을 통째로 꺼 둔 날은 도착 목표도 없음) + 실제 `alarm_events` — DB
 - 날짜 이동 (D48): 월간 · 주간 날짜를 누르면 그날 일간, 일간 이전 · 다음 · 오늘, 일간에서 그날 일기(A03). 점수 · 달력 점 규칙은 D26 · D27
 

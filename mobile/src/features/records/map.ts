@@ -18,7 +18,7 @@ export type RecordRow = Pick<
   Tables<'daily_records'>,
   'record_date' | 'sleep_at' | 'wake_reported_at' | 'wake_confirmed_at' | 'actual_prepare_minutes' | 'routine_done_rate' | 'sleep_satisfaction' | 'condition_note' | 'data_source'
 >;
-export type JournalDayRow = Pick<Tables<'daily_journals'>, 'record_date' | 'coaching_insight'>;
+export type JournalDayRow = Pick<Tables<'daily_journals'>, 'record_date' | 'ai_summary' | 'edited_summary' | 'is_edited'>;
 
 // 그날 기록 → 달력 점을 정하는 사실 (summary.ts dayMark에 넘김). 행이 없으면 일기만 봄
 export function factsOf(record: RecordRow | undefined, hasJournal: boolean): DayFacts {
@@ -49,11 +49,8 @@ export function wakeRowsOf(days: readonly Date[], records: readonly RecordRow[],
   });
 }
 
-// 그 주 AI 코칭 — 주 단위 글은 DB에 없어서 그 주에서 가장 최근 일기의 코칭을 보여 줌. 없으면 빈 글자
-export function latestCoaching(journals: readonly JournalDayRow[]): string {
-  const sorted = [...journals].sort((a, b) => b.record_date.localeCompare(a.record_date));
-  return sorted.find((j) => j.coaching_insight?.trim())?.coaching_insight?.trim() ?? '';
-}
+// 글이 있는 일기인지 — 고쳤으면 고친 글 (routine/map.ts 일기 화면 · 서버 weekly-summary journalText와 같은 규칙). 주간 AI 요약은 이런 날만 씀
+export const hasJournalText = (j: JournalDayRow): boolean => !!(j.is_edited && j.edited_summary != null ? j.edited_summary : j.ai_summary)?.trim();
 
 // ---------------------------------------------------------------------------
 // 일간 (alarms 설정한 값 + alarm_events 실제로 일어난 일)
