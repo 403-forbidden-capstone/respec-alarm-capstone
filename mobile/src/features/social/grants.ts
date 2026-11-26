@@ -48,8 +48,11 @@ export function isValidSource(row: PermRow, friends: readonly FriendRow[], membe
 //   동의(wake_share_opt_in)했을 때, 친구 출처는 항상 없음 (친구 출처 기상 조회 행은 서버가 이제 못 넣음)
 export function effectiveOf(row: PermRow, friends: readonly FriendRow[], members: readonly MemberRow[]): PermissionSet | null {
   if (!isValidSource(row, friends, members)) return null;
-  const consented = row.source_type === 'GROUP' && members.some((m) => m.group_id === row.source_id && m.user_id === row.owner_id && m.invite_status === 'JOINED' && m.wake_share_opt_in);
-  return { viewAlarm: row.can_view_alarm, editAlarm: row.can_edit_alarm, viewWake: consented };
+  if (row.source_type === 'FRIEND') return { viewAlarm: false, editAlarm: false, viewWake: row.can_view_wake };
+  const owner = members.find((m) => m.group_id === row.source_id && m.user_id === row.owner_id && m.invite_status === 'JOINED');
+  const viewer = members.find((m) => m.group_id === row.source_id && m.user_id === row.grantee_id && m.invite_status === 'JOINED');
+  const viewWake = !!owner?.wake_share_opt_in && !!viewer?.wake_share_opt_in;
+  return { viewAlarm: row.can_view_alarm, editAlarm: row.can_edit_alarm, viewWake, viewTrip: viewWake && !!owner?.trip_share_opt_in };
 }
 
 // 여러 관계의 권한을 항목별로 합침 — 하나라도 허용하면 허용 (4장 4.6 "최종 권한의 계산")
@@ -57,7 +60,8 @@ export function mergeGrants(rows: GrantRow[]): FinalGrant {
   const viewAlarm = rows.some((r) => r.viewAlarm);
   const editAlarm = rows.some((r) => r.editAlarm);
   const viewWake = rows.some((r) => r.viewWake);
-  return { viewAlarm, editAlarm, viewWake, rows, count: [viewAlarm, editAlarm, viewWake].filter(Boolean).length };
+  const viewTrip = rows.some((r) => r.sourceType === 'GROUP' && r.viewTrip);
+  return { viewAlarm, editAlarm, viewWake, viewTrip, rows, count: [viewAlarm, editAlarm, viewWake, viewTrip].filter(Boolean).length };
 }
 
 // 권한 집합 여럿을 항목별로 합침 (그룹에 준 권한 = 멤버마다 쓴 행의 합집합, D18 열림)
