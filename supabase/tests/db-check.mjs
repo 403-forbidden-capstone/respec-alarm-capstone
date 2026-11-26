@@ -248,8 +248,8 @@ await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · aut
     has_function_privilege('service_role', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as server_claim,
     (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
   // 내 시험 데이터 지우기 — 시험 계정(@example.com)의 주간 요약만 지움, 남의 줄은 그대로
-  const WS_ME = '6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b';
-  const WS_OTHER = '7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c';
+  const WS_ME = 'e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1';
+  const WS_OTHER = 'e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2';
   await as(null, 'supabase_auth_admin');
   await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'weekly-me@example.com', '{}'::jsonb), ($2, 'weekly-other@example.com', '{}'::jsonb)`, [WS_ME, WS_OTHER]);
   await su();
@@ -261,6 +261,8 @@ await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · aut
   await su();
   const wsLeft = Object.fromEntries((await q(`select user_id::text as u, count(*)::int as n from public.weekly_summaries where user_id in ($1, $2) group by 1`, [WS_ME, WS_OTHER])).map((r) => [r.u, r.n]));
   x.reset = wsLeft;
+  // 만든 시험 계정은 지움 — 뒤 검사(사용자 수 · 프로필 목록)에 안 섞이게. profiles · weekly_summaries는 cascade로 같이
+  await q(`delete from auth.users where id in ($1, $2)`, [WS_ME, WS_OTHER]);
   return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && x.server_insert
     && x.on_delete === 'c' && Number(x.monday) === 1 && !x.client_claim && x.server_claim && /'WS'/.test(x.point_check) && /'AW'/.test(x.point_check)
     && !wsLeft[WS_ME] && wsLeft[WS_OTHER] === 1 ? true : x;
