@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
   result: { marginTop: 6 },
   group: { marginTop: 8 },
   groupNote: { marginBottom: 6 },
-  pick: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, padding: 3, borderRadius: radius.chip },
+  pick: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, paddingHorizontal: 3, paddingVertical: 6, borderRadius: radius.chip }, // 위아래 6 — hitSlop은 부모 밖으로 못 나가서, 맨 위 · 아래 칩도 누르는 칸 44가 되게
   pickItem: {
     flexGrow: 1,
     flexShrink: 1,
