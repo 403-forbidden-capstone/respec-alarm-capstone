@@ -1,18 +1,17 @@
 import { autoImportance } from '@shared/calc/importance.ts';
-import { autoLevel } from '@shared/calc/intensity.ts';
 import { prepareSourceLabel } from '@shared/calc/prepare.ts';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { Button, Card, DateRow, KeyValueRow, LoadError, Screen, Sheet, Text, toast, Toggle, TopBar } from '@/components/ui';
-import { createAppointment, defaultDraft, draftAt, estimateAppointment, listAppointments, listPlaces, reverseAddress } from '@/features/alarm/api';
+import { createAppointment, defaultDraft, draftAt, estimateAppointment, getIntensityBasis, listAppointments, listPlaces, reverseAddress } from '@/features/alarm/api';
 import { adjustEstimate, isManualTime, orderError } from '@/features/alarm/adjust';
 import { useNow } from '@/features/alarm/hooks/useNow';
+import { AlarmIntensityCard, AUTO_LEVELS, type AxisLevels } from '@/features/alarm/components/AlarmIntensityCard';
 import { AreaPlaceNote } from '@/features/alarm/components/AreaPlaceNote';
 import { HomeMissingNotice } from '@/features/alarm/components/HomeMissingNotice';
 import { ItemChips } from '@/features/alarm/components/ItemChips';
-import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { MapPlaceSheet } from '@/features/alarm/components/MapPlaceSheet';
 import { RepeatPicker } from '@/features/alarm/components/RepeatPicker';
 import { SelectRow } from '@/features/alarm/components/SelectRow';
@@ -21,6 +20,7 @@ import { TimeButton } from '@/features/alarm/components/TimeButton';
 import { TimePickBody } from '@/features/alarm/components/TimePicker';
 import { TimeRow } from '@/features/alarm/components/TimeRow';
 import { isHomeMissing } from '@/features/alarm/homeMissing';
+import { toIntensity } from '@/features/alarm/map';
 import { selectedUserPlaceLabel, withDestination, withUserPlace } from '@/features/alarm/destinationPick';
 import { homeOf } from '@/features/alarm/placeSheet';
 import { repeatLabel, repeatToRrule } from '@/features/alarm/repeat';
@@ -34,8 +34,6 @@ import {
   TRANSPORT_LABEL,
   TRANSPORT_OPTIONS,
   type Estimate,
-  type IntensityAxis,
-  type Level,
   type Place,
   type RingKind,
   type Transport,
@@ -63,9 +61,6 @@ import { SHARED_APPOINTMENT_NOTE, sharedSavedToast } from '@/features/social/gro
 import { colors, font } from '@/theme';
 import { useAccent } from '@/lib/skyTone';
 
-const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
-type Levels = Record<IntensityAxis, Level | null>;
-const EMPTY_LEVELS: Levels = { sound: null, voice: null, vibration: null };
 
 type EarlierWake = { title: string; at: Date }; // 같은 날 앞 일정의 기상 알람 (schedule.ts earlierWakeOf)
 
@@ -112,7 +107,6 @@ export default function NewScheduleScreen() {
   const home = homeOf(auth.profile); // 프로필의 집 좌표 — 있으면 검색 결과를 집에서 가까운 순으로 (가짜 데이터의 가짜 프로필은 좌표가 없음)
   const [showRepeat, setShowRepeat] = useState(false); // 반복 고르기 펼침
   const [showOrigin, setShowOrigin] = useState(false); // 출발지 선택 펼침
-  const [showIntensity, setShowIntensity] = useState(false); // 알람 강도 세 줄 펼침
   const [showCalc, setShowCalc] = useState(false); // 계산 근거 "자세히"를 펼침
   const [homeMissing, setHomeMissing] = useState(false); // 계산이 집 위치를 몰라 막힘 — 안내 카드 [집 정하기]
   const [homeSheetOpen, setHomeSheetOpen] = useState(false); // 집 찾기 시트
@@ -123,13 +117,10 @@ export default function NewScheduleScreen() {
   const current = useNow();
   const set = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((d) => ({ ...d, [key]: value }));
   // 새 일정의 세 축을 별도 설정. null이면 자동이며, 저장 시 서버 alarm-commit의 levels로 전달됨.
-  const [levels, setLevels] = useState<Levels>(() => ({ ...(initial.levels ?? EMPTY_LEVELS) }));
-  const autoIntensity = autoLevel(draft.importance, 0);
-  const setAxis = (axis: IntensityAxis, level: Level | null) => setLevels((old) => ({ ...old, [axis]: level }));
-  const manualIntensity = AXES.some(([axis]) => levels[axis] != null);
-  // 접힌 강도 한 줄 — 직접 고른 값이 있으면 그 값 기준으로 보임
-  const lvOf = (axis: IntensityAxis): Level => levels[axis] ?? autoIntensity;
-  const intensitySummary = `${LEVELS[lvOf('sound')].name} · ${LEVELS[lvOf('sound')].sound} · ${LEVELS[lvOf('voice')].voice} · ${LEVELS[lvOf('vibration')].vibration}`;
+  const [levels, setLevels] = useState<AxisLevels>(() => ({ ...(initial.levels ?? AUTO_LEVELS) }));
+  // 예상 자동 강도 — 알람 설정(H03)과 같은 계산(toIntensity) · 같은 입력(최근 4주 지각 · 잠귀 · 기본 말소리). 못 읽으면 중요도만으로 보고 그렇다고 안내
+  const { data: intensityBasis, error: intensityBasisError, reload: reloadIntensityBasis } = useLoad(getIntensityBasis);
+  const intensity = toIntensity([], draft.importance, intensityBasis?.lateCount ?? 0, intensityBasis?.wakeSensitivity, intensityBasis?.voiceDefault);
 
   // 뭔가 입력했으면 나갈 때 한 번 물음 (처음 값 그대로면 묻지 않음)
   const dirty =
@@ -423,54 +414,16 @@ export default function NewScheduleScreen() {
         />
       </Card>
 
-      <Card>
-        <Text variant="label" tone="sub">
-          알람 강도
-        </Text>
-        {/* 기본은 한 줄 요약 — 바꾸기를 눌러야 배경음 · 말소리 · 진동이 펴짐 */}
-        <View style={styles.between}>
-          <Text variant="body" style={styles.summary}>
-            {intensitySummary}
-          </Text>
-          <TextLink label={showIntensity ? '접기 ›' : '바꾸기 ›'} onPress={() => setShowIntensity((v) => !v)} />
-        </View>
-        {showIntensity ? (
-          <>
-            <Text variant="small" tone="sub" style={styles.intensityNote}>
-              배경음 · 말소리 · 진동을 각각 골라요. 두 번 미루거나 늦을 것 같으면 AI 목소리로 한 번 더 깨워요.
-            </Text>
-            <Text variant="small" tone="sub">
-              예상 자동 강도: {LEVELS[autoIntensity].name} (저장 시 지각 이력과 잠귀 설정도 반영)
-            </Text>
-          </>
-        ) : null}
-        {showIntensity
-          ? AXES.map(([axis, name]) => {
-              const selected = levels[axis];
-              const level = selected ?? autoIntensity;
-              return (
-                <View key={axis} style={styles.axisRow}>
-                  <View style={styles.axisTitle}>
-                    <Text variant="rowLabel" tone="sub">{name}</Text>
-                    {selected != null ? <Text variant="caption" tone="sub">직접 고름</Text> : null}
-                  </View>
-                  <OptionGrid<Level>
-                    size="mini"
-                    label={`${name} 강도`}
-                    options={LEVEL_OPTIONS}
-                    value={level}
-                    onChange={(next) => setAxis(axis, next)}
-                  />
-                  <View style={styles.axisDetails}>
-                    {selected != null ? <TextLink label="자동으로" onPress={() => setAxis(axis, null)} /> : <View />}
-                    <Text variant="caption" tone="faint">{LEVELS[level][axis]}</Text>
-                  </View>
-                </View>
-              );
-            })
-          : null}
-        {showIntensity && manualIntensity ? <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ ...EMPTY_LEVELS })} /> : null}
-      </Card>
+      <AlarmIntensityCard
+        auto={intensity.auto}
+        voiceAuto={intensity.voiceAuto}
+        importance={draft.importance}
+        lateCount={intensity.lateCount}
+        levels={levels}
+        onChange={setLevels}
+        basis={intensityBasis ? undefined : intensityBasisError ? 'fallback' : 'loading'}
+        onRetry={() => reloadIntensityBasis()}
+      />
 
       <Card>
         <ItemChips
@@ -760,9 +713,6 @@ const styles = StyleSheet.create({
   titleLabel: { marginTop: 10, marginBottom: 6, fontSize: 13.5 },
   titleInput: { fontSize: 15, color: colors.ink, textAlign: 'left', backgroundColor: colors.chip, borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 4 },
   titleInputError: { borderColor: colors.warn },
-  between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 8 },
-  summary: { flex: 1 },
-  intensityNote: { marginTop: 8 },
   foldRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
   foldDivider: { borderTopWidth: 1, borderTopColor: colors.line },
   foldLink: { alignSelf: 'flex-end', marginTop: 4 },
@@ -770,9 +720,6 @@ const styles = StyleSheet.create({
   timetableLink: { marginBottom: 12, alignSelf: 'flex-start' },
   title: { marginTop: 8, marginBottom: 12 },
   optLabel: { marginTop: 12, marginBottom: 8 },
-  axisRow: { marginTop: 14 },
-  axisTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  axisDetails: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 2 },
   groupNote: { marginTop: 6, marginBottom: 4 },
   cardLabel: { marginBottom: 8 },
   wakeNote: { marginTop: -4, marginBottom: 8 },
