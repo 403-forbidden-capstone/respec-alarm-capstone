@@ -12,16 +12,17 @@ import { supabase } from '@/lib/supabase';
 import { requireUserId } from '@/lib/user';
 import type { Json, Tables, TablesInsert, TablesUpdate } from '@/types/database';
 
-import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle } from './calendar';
+import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekStart, weekTitle } from './calendar';
 import {
   actualRows,
   alarmPatch,
   factsOf,
+  hasJournalText,
+  journalKeyOf,
   isAlarmValueSuggestion,
   isApplicableValue,
   isPlanned,
   isUuid,
-  latestCoaching,
   plannedRow,
   SUGGESTION_KIND,
   toPrepareSuggestion,
@@ -35,7 +36,7 @@ import {
   type SuggestionTarget,
 } from './map';
 import { buildWeekSummary, dayMark } from './summary';
-import type { DayRecord, MonthRecord, Suggestion, SuggestionStatus, TimelineRow, WeekRecord } from './types';
+import type { DayRecord, MonthRecord, Suggestion, SuggestionStatus, TimelineRow, WeekAiSummary, WeekRecord } from './types';
 
 // 기록 화면의 오늘 (한국 시간 0시)
 export const recordToday = () => startOfDay(now());
@@ -54,9 +55,9 @@ async function loadRecords(userId: string, fromKey: string, toKey: string): Prom
   return data ?? [];
 }
 
-// 날짜 범위의 일기 (있는 날 표시 · 주간 코칭)
+// 날짜 범위의 일기 (있는 날 표시 · 주간 AI 요약을 읽을지)
 async function loadJournalDays(userId: string, fromKey: string, toKey: string): Promise<JournalDayRow[]> {
-  const { data, error } = await supabase.from('daily_journals').select('record_date, coaching_insight').eq('user_id', userId).gte('record_date', fromKey).lte('record_date', toKey);
+  const { data, error } = await supabase.from('daily_journals').select('record_date, ai_summary, edited_summary, is_edited').eq('user_id', userId).gte('record_date', fromKey).lte('record_date', toKey);
   if (error) throw error;
   return data ?? [];
 }
@@ -166,7 +167,7 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
     loadWakeAlarmAts(userId, before[0], addDays(days[6], 1)),
   ]);
   const todayKey = dayKey(t);
-  const thisWeekJournals = journals.filter((j) => j.record_date >= dayKey(days[0]));
+  const weekJournals = journals.filter((j) => j.record_date >= dayKey(days[0]) && hasJournalText(j));
   return {
     title: weekTitle(anyDay),
     relative,
@@ -192,9 +193,20 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
       relative,
       today: t,
       todayWoke: records.some((r) => r.record_date === todayKey && r.wake_confirmed_at != null),
-      coaching: latestCoaching(thisWeekJournals),
     }),
+    journalDays: weekJournals.length,
+    journalKey: journalKeyOf(weekJournals),
   };
+}
+
+// weekly-summary 응답 (supabase/functions/_shared/weekly-summary.ts WeeklySummaryOut)
+type WeeklySummaryOut = { week_start: string; week_end: string; dates: string[]; summary: string | null; generated_at: string | null; stale: boolean };
+
+// 주간 AI 요약 — 그 주 일기로 서버가 만든 글. 같은 기록이면 서버가 저장된 글을 줘서 모델을 다시 안 부름. 그 주 일기가 없으면 null
+//   기록 일수 · 기간은 서버가 센 값 (stale이면 그 글을 만들 때의 일수)
+export async function getWeekAiSummary(anyDay: Date): Promise<WeekAiSummary | null> {
+  const r = await callEdge<WeeklySummaryOut>('weekly-summary', { week_start: dayKey(weekStart(anyDay)) });
+  return r.summary ? { text: r.summary, dayCount: r.dates.length, period: weekTitle(anyDay), stale: r.stale } : null;
 }
 
 // 일간 — 설정한 값(그날 alarms) + 실제로 일어난 일(alarm_events). 아직 오지 않은 날은 빈 기록 (가짜와 같음)

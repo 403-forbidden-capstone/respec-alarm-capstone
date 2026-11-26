@@ -7,6 +7,7 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { addDays, dateParts, dayKey, isSameDay, startOfDay } from '@/lib/format';
 import { isMock } from '@/lib/mode';
+import { stableUuid } from '@/lib/uuid';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, TODAY } from '@/mocks/data';
 import { pastDay } from '@/mocks/records';
@@ -15,7 +16,7 @@ import { leadingBlanks, monthDays, monthTitle, weekDays, weekRelative, weekTitle
 import * as real from './real';
 import { prepareBounds, shiftLog } from './suggestion';
 import { buildWeekSummary, dayMark, wakeScore, type WakeRow } from './summary';
-import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekRecord, WeekSummary } from './types';
+import type { DayMark, DayRecord, MonthRecord, Suggestion, WeekAiSummary, WeekRecord, WeekSummary } from './types';
 
 // 기록 화면의 오늘 — 목업은 시나리오 시각(아침 · 전날 밤)과 상관없이 5월 22일
 const today = () => kst(TODAY, 0);
@@ -67,7 +68,7 @@ function weekRows(days: Date[]): WakeRow[] {
   return rows;
 }
 
-// 주간 요약 — 계산은 summary.ts buildWeekSummary (실데이터도 같은 함수)
+// 주간 기상 통계 — 계산은 summary.ts buildWeekSummary (실데이터도 같은 함수)
 function weekSummary(days: Date[], relative: string): WeekSummary | null {
   return buildWeekSummary({
     days,
@@ -76,8 +77,13 @@ function weekSummary(days: Date[], relative: string): WeekSummary | null {
     relative,
     today: today(),
     todayWoke: db.me.wakeAt != null,
-    coaching: '회의가 있는 날은 준비가 평균 12분 길었어요. 전날 밤 준비 루틴을 만들면 아침이 여유로워져요.',
   });
+}
+
+// 그 주 글이 있는 일기 수 · 날짜와 글 지문 — 목업 일기(routine/api getJournal)
+async function journalsOf(days: Date[]): Promise<{ count: number; key: string }> {
+  const journals = (await Promise.all(days.map((d) => getJournal(dayKey(d))))).filter((j) => j?.text.trim());
+  return { count: journals.length, key: stableUuid(...journals.flatMap((j) => [j!.recordDate, j!.text.trim()])) };
 }
 
 // 주간 (R02) — anyDay가 든 주 (월요일 시작). 기록이 없는 주는 요약 없이 날짜 줄만
@@ -98,10 +104,24 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
       recorded: markOf(date) !== 'none',
     })),
     summary: weekSummary(days, relative),
+    ...(await journalsOf(days).then(({ count, key }) => ({ journalDays: count, journalKey: key }))),
   };
 }
 
-// 주간 요약이 없을 때 문구 — 날짜 줄에 기록 점이 있는데 "기록이 없어요"라고 하면 어긋남
+// 주간 AI 요약 (R02) — 실데이터는 서버 weekly-summary가 그 주 일기로 만든 글. 목업은 고정 글에 그 주 일기 수만 맞춤
+export async function getWeekAiSummary(anyDay: Date): Promise<WeekAiSummary | null> {
+  if (!isMock()) return real.getWeekAiSummary(anyDay);
+  const dayCount = (await journalsOf(weekDays(anyDay))).count;
+  if (!dayCount) return null;
+  return {
+    text: '회의가 있는 날은 준비가 길어지는 흐름이 보였어요. 기록한 날마다 준비물을 전날 챙긴 점이 좋았어요. 다음 주에는 전날 밤 준비 루틴을 하나 만들어 보면 아침이 여유로워져요.',
+    dayCount,
+    period: weekTitle(anyDay),
+    stale: false,
+  };
+}
+
+// 기상 통계 · AI 요약이 둘 다 없을 때 문구 — 날짜 줄에 기록 점이 있는데 "기록이 없어요"라고 하면 어긋남 (기록이 전혀 없을 때만 "기록이 없어요")
 export function weekEmptyText(week: WeekRecord): string {
   return week.strip.some((d) => d.recorded) ? '이 주 요약이 아직 없어요.' : '이 주에는 기록이 없어요.';
 }

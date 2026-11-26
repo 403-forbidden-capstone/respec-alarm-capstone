@@ -1,4 +1,4 @@
-// R02 기록 계산 — 점수 · 목표 기상 · 달력 점 · 주간 요약. 순수 함수 (시험: __tests__/summary.test.ts)
+// R02 기록 계산 — 점수 · 목표 기상 · 달력 점 · 주간 기상 통계. 순수 함수 (시험: __tests__/summary.test.ts)
 // 가짜 데이터(api.ts)와 실데이터(real.ts)가 같은 함수를 써서 두 모드의 뜻이 어긋나지 않게 함
 //   점수식(D26) · 달력 점 기준(D27)은 열린 안건이라 목업 계산 그대로 — 바꾸려면 이 파일만 고침
 import { addMinutes, dateParts, isSameDay } from '@/lib/format';
@@ -43,10 +43,9 @@ export type WeekSummaryInput = {
   relative: string; // 이번 주 · 지난주 · 2주 전
   today: Date; // 오늘 0시
   todayWoke: boolean; // 오늘 기상 확인이 있음
-  coaching: string; // 없으면 빈 글자 (화면이 카드를 접음)
 };
 
-// 주간 요약 — 기록이 한 날이라도 있는 주. 평균 기상은 앞 주와 견줌 (앞 주 기록이 없으면 견주지 않음)
+// 주간 기상 통계 — 기상 기록이 한 날이라도 있는 주 (AI 주간 요약은 따로, 서버 weekly-summary). 평균 기상은 앞 주와 견줌 (앞 주 기록이 없으면 견주지 않음)
 export function buildWeekSummary(input: WeekSummaryInput): WeekSummary | null {
   const { days, rows, beforeRows, relative, today } = input;
   if (!rows.length) return null;
@@ -74,6 +73,5 @@ export function buildWeekSummary(input: WeekSummaryInput): WeekSummary | null {
     goalText: `${relative} ${goal}/${rows.length}일`,
     bars,
     todayPending: thisWeek && !input.todayWoke,
-    coaching: input.coaching,
   };
 }

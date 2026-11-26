@@ -43,14 +43,23 @@ export type WeekSummary = {
   goalText: string; // 이번 주 3/3일
   bars: WeekBar[];
   todayPending: boolean; // 오늘 기록은 기상 확인 뒤에 더해짐
-  coaching: string;
+};
+
+// 주간 AI 요약 — 그 주 하루 일기 글을 모아 만든 글 (서버 weekly-summary). 기상 기록과 상관없이 일기가 하루라도 있으면 있음
+export type WeekAiSummary = {
+  text: string;
+  dayCount: number; // 반영된 기록 일수
+  period: string; // 대상 기간 — 5월 19일 — 25일
+  stale: boolean; // 최근에 바뀐 기록을 아직 반영하지 못한 저장된 글
 };
 
 export type WeekRecord = {
   title: string; // 5월 19일 — 25일
   relative: string; // 이번 주 · 지난주 · 2주 전
   strip: WeekDay[]; // 월 ~ 일
-  summary: WeekSummary | null; // 기록이 없는 주는 null
+  summary: WeekSummary | null; // 기상 통계 — 점수를 낼 기상 기록이 없는 주는 null
+  journalDays: number; // 글이 있는 일기 수 — 0이 아니면 AI 주간 요약을 읽음
+  journalKey: string; // 그 주 일기 날짜 · 글 지문 — 바뀌면(새로고침에서 글만 고친 경우 포함) AI 요약을 다시 읽음
 };
 
 export type TimelineRow = { at: Date; label: string; source: string; past?: boolean };

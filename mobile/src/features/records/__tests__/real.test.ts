@@ -4,7 +4,7 @@ import { UserError } from '@/lib/errors';
 import { dayKey, formatTime } from '@/lib/format';
 
 import { calls, filterOf, onCall, resetFake, type FakeCall, type FakeReply } from '../testing/fakeSupabase';
-import { applySuggestion, getDay, getMonth, getPendingSuggestion, getSuggestion, getWeek, ignoreSuggestion, recordToday, reopenSuggestion, undoSuggestion } from '../real';
+import { applySuggestion, getDay, getMonth, getPendingSuggestion, getSuggestion, getWeek, getWeekAiSummary, ignoreSuggestion, recordToday, reopenSuggestion, undoSuggestion } from '../real';
 
 // real.ts가 어느 테이블을 어떤 조건으로 읽고 어떤 순서로 쓰는지 — 가짜 클라이언트로 확인 (칸 이름은 tsc, 행 → 화면 변환은 map.test.ts)
 jest.mock('@/lib/supabase', () => ({ supabase: jest.requireActual<typeof import('../testing/fakeSupabase')>('../testing/fakeSupabase').fakeClient }));
@@ -14,6 +14,8 @@ let mockNow = new Date('2026-10-19T00:30:00Z');
 jest.mock('@/lib/clock', () => ({ now: () => mockNow }));
 const mockReconcile = jest.fn<(options: { alarmIds?: string[] }) => Promise<unknown>>();
 jest.mock('@/lib/alarmSync', () => ({ reconcile: (options: { alarmIds?: string[] }) => mockReconcile(options) }));
+const mockCallEdge = jest.fn<(name: string, body: Record<string, unknown>) => Promise<unknown>>();
+jest.mock('@/lib/edge', () => ({ callEdge: (name: string, body: Record<string, unknown>) => mockCallEdge(name, body) }));
 
 const SUGGESTION_ID = '2b9f6a4e-5c0e-4d3b-9a77-0a1b2c3d4e5f';
 const reply = (handler: (call: FakeCall) => FakeReply | undefined) => onCall(handler);
@@ -56,7 +58,7 @@ describe('R02 월간', () => {
         const key = filterOf(c, 'eq', 'record_date')?.[1]; // 오늘 기록 줄을 읽는 질의는 날짜 하나
         return { data: key ? all.find((r) => r.record_date === key) : all };
       }
-      if (c.table === 'daily_journals') return c.columns === 'journal_id' ? { data: { journal_id: 'j1' } } : { data: [{ record_date: '2026-10-14', coaching_insight: null }] };
+      if (c.table === 'daily_journals') return c.columns === 'journal_id' ? { data: { journal_id: 'j1' } } : { data: [{ record_date: '2026-10-14', ai_summary: null, edited_summary: null, is_edited: false }] };
       if (c.table === 'alarm_events') {
         return {
           data: [
@@ -104,11 +106,11 @@ describe('R02 주간', () => {
         };
       }
       if (c.table === 'alarms') return { data: [{ scheduled_at: '2026-10-18T22:20:00Z' }, { scheduled_at: '2026-10-11T22:20:00Z' }] };
-      if (c.table === 'daily_journals') return { data: [{ record_date: '2026-10-20', coaching_insight: '이번 주 코칭' }] };
+      if (c.table === 'daily_journals') return { data: [{ record_date: '2026-10-20', ai_summary: '화요일 일기', edited_summary: null, is_edited: false }] };
       return undefined;
     });
 
-  it('이번 주 요약: 평균 기상 · 앞 주와 견줌 · 목표 기상률 · 막대 · 코칭', async () => {
+  it('이번 주 요약: 평균 기상 · 앞 주와 견줌 · 목표 기상률 · 막대 · 일기 수', async () => {
     rows();
     const w = await getWeek(new Date('2026-10-21T03:00:00Z'));
     expect([w.title, w.relative]).toEqual(['10월 19일 — 25일', '이번 주']);
@@ -118,7 +120,8 @@ describe('R02 주간', () => {
     expect(s.averageText).toBe('지난주보다 12분 빨라요'); // 지난주 7:41 = 461분, 이번 주 449분
     expect([s.goalRate, s.goalText]).toEqual([100, '이번 주 1/1일']);
     expect(s.bars.map((b) => `${b.label}:${b.score}`)).toEqual(['월 19:88']);
-    expect([s.todayPending, s.coaching]).toEqual([false, '이번 주 코칭']);
+    expect(s.todayPending).toBe(false);
+    expect(w.journalDays).toBe(1);
 
     // 앞 주부터 이번 주까지 한 번에 읽음
     const records = onlyCalls('daily_records')[0];
@@ -127,7 +130,7 @@ describe('R02 주간', () => {
     expect([filterOf(alarms, 'eq', 'alarm_type')?.[1], filterOf(alarms, 'eq', 'is_enabled')?.[1], filterOf(alarms, 'eq', 'user_id')?.[1]]).toEqual(['WAKE', true, 'user-1']);
   });
 
-  it('오늘 기상 확인 전이면 기록 대기, 앞 주 기록이 없으면 견주지 않음, 코칭 일기가 없으면 빈 글자', async () => {
+  it('오늘 기상 확인 전이면 기록 대기, 앞 주 기록이 없으면 견주지 않음, 일기가 없으면 일기 수 0', async () => {
     reply((c) => {
       if (c.table === 'daily_records') return { data: [record('2026-10-14', { wake_confirmed_at: '2026-10-13T22:25:00Z' })] };
       if (c.table === 'alarms') return { data: [{ scheduled_at: '2026-10-13T22:20:00Z' }] };
@@ -135,7 +138,8 @@ describe('R02 주간', () => {
     });
     const w = await getWeek(new Date('2026-10-14T03:00:00Z'));
     expect(w.relative).toBe('지난주');
-    expect(w.summary).toMatchObject({ averageText: '그 전 주 기록이 없어 견줄 수 없어요', todayPending: false, coaching: '' });
+    expect(w.summary).toMatchObject({ averageText: '그 전 주 기록이 없어 견줄 수 없어요', todayPending: false });
+    expect(w.journalDays).toBe(0);
     const thisWeek = await getWeek(new Date('2026-10-19T03:00:00Z'));
     expect(thisWeek.summary).toBeNull(); // 이번 주에는 기록이 없음
   });
@@ -470,5 +474,51 @@ describe('S01 되돌리기 · 무시 · 다시 보기', () => {
 
     suggestionDb(suggestionRow());
     await expect(reopenSuggestion(SUGGESTION_ID)).rejects.toThrow('무시한 제안만 다시 볼 수 있어요');
+  });
+});
+
+describe('R02 주간 AI 요약 — 기상 기록과 분리', () => {
+  const journal = (date: string, text: string | null) => ({ record_date: date, ai_summary: text, edited_summary: null, is_edited: false });
+
+  it.each([
+    [0, []],
+    [1, ['2026-10-21']],
+    [3, ['2026-10-19', '2026-10-21', '2026-10-25']],
+    [7, ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25']],
+  ])('기상 기록 · 기상 알람이 없어도 글이 있는 일기 %i일을 셈 (기상 통계는 없음)', async (n, dates) => {
+    reply((c) => (c.table === 'daily_journals' ? { data: [...dates.map((d) => journal(d, `${d} 일기`)), journal('2026-10-13', '앞 주'), journal('2026-10-22', '  ')].filter((j, i, all) => all.findIndex((x) => x.record_date === j.record_date) === i) } : { data: [] }));
+    const w = await getWeek(new Date('2026-10-21T03:00:00Z'));
+    expect(w.summary).toBeNull();
+    expect(w.journalDays).toBe(n);
+  });
+
+  it('서버 응답 → 글 · 반영된 기록 일수 · 대상 기간, 요청은 그 주 월요일', async () => {
+    mockCallEdge.mockResolvedValueOnce({ week_start: '2026-10-19', week_end: '2026-10-25', dates: ['2026-10-19', '2026-10-21', '2026-10-23'], summary: '요약 글', generated_at: '2026-10-23T12:00:00Z', stale: false });
+    expect(await getWeekAiSummary(new Date('2026-10-23T03:00:00Z'))).toEqual({ text: '요약 글', dayCount: 3, period: '10월 19일 — 25일', stale: false });
+    expect(mockCallEdge).toHaveBeenLastCalledWith('weekly-summary', { week_start: '2026-10-19' });
+  });
+
+  it('주차를 바꾸면 그 주 월요일로 따로 읽음 — 지난 주 요약도 그대로 조회', async () => {
+    mockCallEdge.mockImplementation(async (_name, body) => ({ week_start: body.week_start, week_end: '', dates: ['x'], summary: `${String(body.week_start)} 요약`, generated_at: null, stale: body.week_start === '2026-10-12' }));
+    const prev = await getWeekAiSummary(new Date('2026-10-14T03:00:00Z'));
+    const cur = await getWeekAiSummary(new Date('2026-10-19T03:00:00Z'));
+    expect([prev?.text, prev?.period, prev?.stale]).toEqual(['2026-10-12 요약', '10월 12일 — 18일', true]);
+    expect([cur?.text, cur?.period]).toEqual(['2026-10-19 요약', '10월 19일 — 25일']);
+  });
+
+  it('그 주 일기가 없다고 하면 null', async () => {
+    mockCallEdge.mockResolvedValueOnce({ week_start: '2026-10-19', week_end: '2026-10-25', dates: [], summary: null, generated_at: null, stale: false });
+    expect(await getWeekAiSummary(new Date('2026-10-19T03:00:00Z'))).toBeNull();
+  });
+
+  it('같은 일수에서 일기 글만 고치면 주간 기록의 일기 지문이 바뀜 (새로고침 때 AI 요약을 다시 읽는 기준)', async () => {
+    let text = '수요일 일기';
+    reply((c) => (c.table === 'daily_journals' ? { data: [journal('2026-10-21', text)] } : { data: [] }));
+    const before = await getWeek(new Date('2026-10-21T03:00:00Z'));
+    text = '수요일 일기 (고침)';
+    const after = await getWeek(new Date('2026-10-21T03:00:00Z'));
+    expect([before.journalDays, after.journalDays]).toEqual([1, 1]);
+    expect(after.journalKey).not.toBe(before.journalKey);
+    expect((await getWeek(new Date('2026-10-21T03:00:00Z'))).journalKey).toBe(after.journalKey);
   });
 });

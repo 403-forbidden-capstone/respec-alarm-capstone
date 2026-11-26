@@ -12,7 +12,8 @@ import {
   isApplicableValue,
   isPlanned,
   isUuid,
-  latestCoaching,
+  hasJournalText,
+  journalKeyOf,
   plannedRow,
   SUGGESTION_REASON,
   toSuggestion,
@@ -85,17 +86,14 @@ describe('wakeRowsOf — 주간 요약에 넣을 날', () => {
   });
 });
 
-describe('latestCoaching — 그 주 AI 코칭', () => {
-  it('가장 최근 일기의 코칭, 비었으면 빈 글자', () => {
-    expect(
-      latestCoaching([
-        { record_date: '2026-10-19', coaching_insight: '월요일 코칭' },
-        { record_date: '2026-10-21', coaching_insight: '  수요일 코칭 ' },
-        { record_date: '2026-10-22', coaching_insight: '' },
-      ]),
-    ).toBe('수요일 코칭');
-    expect(latestCoaching([])).toBe('');
-    expect(latestCoaching([{ record_date: '2026-10-19', coaching_insight: null }])).toBe('');
+describe('hasJournalText — 주간 AI 요약에 쓰는 일기', () => {
+  const j = (patch: Partial<{ ai_summary: string | null; edited_summary: string | null; is_edited: boolean }>) => ({ record_date: '2026-10-19', ai_summary: null, edited_summary: null, is_edited: false, ...patch });
+  it('보여 주는 글(고쳤으면 고친 글)이 비지 않은 날만', () => {
+    expect(hasJournalText(j({ ai_summary: '팀플 회의' }))).toBe(true);
+    expect(hasJournalText(j({ ai_summary: '  ' }))).toBe(false);
+    expect(hasJournalText(j({}))).toBe(false);
+    expect(hasJournalText(j({ ai_summary: 'AI', edited_summary: ' ', is_edited: true }))).toBe(false); // 고쳐서 비움
+    expect(hasJournalText(j({ ai_summary: null, edited_summary: '직접 쓴 글', is_edited: true }))).toBe(true);
   });
 });
 
@@ -315,5 +313,22 @@ describe('S01 제안 (DB 종류: 말소리 · 배경음 · 진동)', () => {
   it('uuid 모양만 DB에서 찾음 (가짜 데이터 주소 s1이 남아 있어도 오류 없이 없음)', () => {
     expect(isUuid('2b9f6a4e-5c0e-4d3b-9a77-0a1b2c3d4e5f')).toBe(true);
     expect(isUuid('s1')).toBe(false);
+  });
+});
+
+describe('journalKeyOf — 그 주 일기 글 지문 (AI 요약을 다시 읽을지)', () => {
+  const j = (date: string, text: string | null, edited?: string) => ({ record_date: date, ai_summary: text, edited_summary: edited ?? null, is_edited: edited !== undefined });
+  const week = [j('2026-10-19', '월요일'), j('2026-10-21', '수요일')];
+  it('같은 기록이면 같은 지문 (순서 상관없음), 글이 빈 날은 안 셈', () => {
+    expect(journalKeyOf([...week].reverse())).toBe(journalKeyOf(week));
+    expect(journalKeyOf([...week, j('2026-10-22', '  ')])).toBe(journalKeyOf(week));
+  });
+  it('일수가 같아도 글만 고치면 다른 지문 — AI 요약을 다시 읽음', () => {
+    expect(journalKeyOf([j('2026-10-19', '월요일', '월요일 고침'), week[1]])).not.toBe(journalKeyOf(week));
+    expect(journalKeyOf([j('2026-10-19', '월요일!'), week[1]])).not.toBe(journalKeyOf(week));
+  });
+  it('날이 바뀌거나 더해지거나 지워지면 다른 지문', () => {
+    expect(journalKeyOf([j('2026-10-20', '월요일'), week[1]])).not.toBe(journalKeyOf(week));
+    expect(journalKeyOf(week.slice(0, 1))).not.toBe(journalKeyOf(week));
   });
 });

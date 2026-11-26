@@ -12,6 +12,7 @@ import {
   getPendingSuggestion,
   getSuggestion,
   getWeek,
+  getWeekAiSummary,
   ignoreSuggestion,
   reopenSuggestion,
   undoSuggestion,
@@ -117,6 +118,16 @@ describe('R02 주간', () => {
     const withDots = { ...(await getWeek(kst(12, 0))), summary: null };
     expect(weekEmptyText(withDots)).toBe('이 주 요약이 아직 없어요.');
     expect(weekEmptyText(await getWeek(kst(40, 0)))).toBe('이 주에는 기록이 없어요.');
+  });
+
+  it('AI 주간 요약은 그 주 일기 수만큼 반영 · 기간 표시, 일기가 없는 주는 null — 기상 통계와 따로', async () => {
+    // 목업 일기는 5월 16 · 19 · 20 · 21일
+    expect((await getWeek(kst(14, 0))).journalDays).toBe(1);
+    expect(await getWeekAiSummary(kst(14, 0))).toMatchObject({ dayCount: 1, period: '5월 12일 — 18일', stale: false });
+    expect((await getWeek(kst(22, 0))).journalDays).toBe(3);
+    expect(await getWeekAiSummary(kst(22, 0))).toMatchObject({ dayCount: 3, period: '5월 19일 — 25일' });
+    const empty = await getWeek(kst(40, 0));
+    expect([empty.journalDays, await getWeekAiSummary(kst(40, 0))]).toEqual([0, null]);
   });
 });
 

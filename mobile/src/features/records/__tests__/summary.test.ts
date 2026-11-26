@@ -53,7 +53,7 @@ describe('buildWeekSummary', () => {
   const days = weekDays(kst(22, 0)); // 5월 19일 월 ~ 25일 일
   const today = kst(22, 0);
   const row = (day: number, wake: number, score: number) => ({ date: kst(day, 0), wake, score });
-  const base = { days, relative: '이번 주', today, todayWoke: false, coaching: '' };
+  const base = { days, relative: '이번 주', today, todayWoke: false };
 
   it('기록이 없는 주는 요약 없음', () => {
     expect(buildWeekSummary({ ...base, rows: [], beforeRows: [row(14, 450, 80)] })).toBeNull();
@@ -95,10 +95,9 @@ describe('buildWeekSummary', () => {
     expect(buildWeekSummary({ ...base, days: weekDays(kst(14, 0)), rows, beforeRows: [] })!.todayPending).toBe(false); // 오늘이 없는 주
   });
 
-  it('오늘 막대는 오늘 표시, 코칭 글은 그대로 넘김', () => {
-    const s = buildWeekSummary({ ...base, rows: [row(22, 455, 61)], beforeRows: [], coaching: '코칭' })!;
+  it('오늘 막대는 오늘 표시', () => {
+    const s = buildWeekSummary({ ...base, rows: [row(22, 455, 61)], beforeRows: [] })!;
     expect(s.bars[0]).toMatchObject({ label: '목 22', isToday: true, isFuture: false });
-    expect(s.coaching).toBe('코칭');
     expect(dayKey(addDays(days[0], 3))).toBe('2025-05-22');
   });
 });

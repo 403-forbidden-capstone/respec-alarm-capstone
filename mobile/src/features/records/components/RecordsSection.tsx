@@ -4,12 +4,12 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, LoadError, Loading, SectionHeader, Segmented, Text, Timeline, toast, type TimelineItem } from '@/components/ui';
 import { TextLink } from '@/features/alarm/components/TextLink';
-import { dayRelative } from '@/features/records/calendar';
+import { dayRelative, weekStart } from '@/features/records/calendar';
 import { CalendarHeader } from '@/features/records/components/CalendarHeader';
 import { MonthCalendar } from '@/features/records/components/MonthCalendar';
 import { ScoreBars } from '@/features/records/components/ScoreBars';
 import { WeekStrip } from '@/features/records/components/WeekStrip';
-import { useDayRecord, useMonthRecord, useRecordToday, useWeekRecord } from '@/features/records/hooks/useRecords';
+import { useDayRecord, useMonthRecord, useRecordToday, useWeekAiSummary, useWeekRecord } from '@/features/records/hooks/useRecords';
 import {
   canMoveNextDay,
   goToday,
@@ -40,7 +40,7 @@ export type Register = (reload: (() => Promise<unknown>) | null) => void;
 type PressDay = (d: { date: Date; isFuture: boolean }) => void;
 
 // R02 나의 기록 — 월간 달력 · 주간 기상 흐름 · 일간(설정한 값과 실제로 일어난 일)
-// 홈에서는 접힌 요약(이번 주 날짜 줄 · 평균 기상 · 목표 기상률 · AI 코칭 한 카드)만 보이고, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간이 펴짐
+// 홈에서는 접힌 요약(이번 주 날짜 줄 · 평균 기상 · 목표 기상률 · AI 주간 요약 한 카드)만 보이고, "자세히"를 누르면 그 자리에서 월간 · 주간 · 일간이 펴짐
 // 기록 탭이 없어지고 홈(H01) 맨 아래에 붙음 (D110). 당겨서 새로고침은 홈이 register로 받은 다시 읽기를 같이 부름
 // 읽기는 features/records/hooks/useRecords (부품은 api.ts를 직접 부르지 않음 — CLAUDE.md 화면 절)
 // 화살표로 앞뒤 달 · 주 · 날을 넘기고, 달력 · 주간 줄의 날짜 · 주간 막대를 누르면 그 날의 일간으로 (D48). 일정 추가 · 상세는 src/app/schedule/
@@ -99,7 +99,7 @@ export function RecordsSection({ register }: { register: Register }) {
   );
 }
 
-// 접힌 요약 — 이번 주 한 카드: 날짜 줄(기록 있는 날 점) · 평균 기상 · 목표 기상률 · AI 코칭 한 문단 + 루틴 만들기
+// 접힌 요약 — 이번 주 한 카드: 날짜 줄(기록 있는 날 점) · 평균 기상 · 목표 기상률(기상 기록이 있을 때) · AI 주간 요약(일기가 있을 때) + 루틴 만들기
 function WeekDigest({ today, onPressDay, register }: { today: Date; onPressDay: PressDay; register: Register }) {
   const accent = useAccent(); // 오늘 날짜 · 기록 점 — 포인트 색 (lib/skyTone)
   const { data, error, reload, emptyText } = useWeekRecord(today);
@@ -131,35 +131,25 @@ function WeekDigest({ today, onPressDay, register }: { today: Date; onPressDay: 
         ))}
       </View>
       {s ? (
-        <>
-          <View style={styles.digestStats}>
-            <View style={styles.digestStat}>
-              <Text variant="label">평균 기상</Text>
-              <Text variant="section">{timeParts(s.averageWake).hm}</Text>
-              <Text variant="caption">{s.averageText}</Text>
-            </View>
-            <View style={styles.digestStat}>
-              <Text variant="label">목표 기상률</Text>
-              <Text variant="section">{`${s.goalRate}%`}</Text>
-              <Text variant="caption">{s.goalText}</Text>
-            </View>
+        <View style={styles.digestStats}>
+          <View style={styles.digestStat}>
+            <Text variant="label">평균 기상</Text>
+            <Text variant="section">{timeParts(s.averageWake).hm}</Text>
+            <Text variant="caption">{s.averageText}</Text>
           </View>
-          {/* AI 코칭 글이 없으면(실데이터에서 그 주 일기가 없을 때) 이 칸을 접음 */}
-          {s.coaching ? (
-            <View style={styles.digestCoach}>
-              <Text variant="label">{data.relative} AI 코칭</Text>
-              <Text variant="body">{s.coaching}</Text>
-              <View style={styles.digestLink}>
-                <TextLink label="루틴 만들기 ›" onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(today) } })} strong />
-              </View>
-            </View>
-          ) : null}
-        </>
-      ) : (
+          <View style={styles.digestStat}>
+            <Text variant="label">목표 기상률</Text>
+            <Text variant="section">{`${s.goalRate}%`}</Text>
+            <Text variant="caption">{s.goalText}</Text>
+          </View>
+        </View>
+      ) : null}
+      {data.journalDays ? <WeekAi key={dayKey(weekStart(today))} period={today} journalKey={data.journalKey} relative={data.relative} compact /> : null}
+      {!s && !data.journalDays ? (
         <Text variant="body" tone="sub" style={styles.digestEmpty}>
           {emptyText}
         </Text>
-      )}
+      ) : null}
     </Card>
   );
 }
@@ -219,7 +209,8 @@ function MonthSection({ period, onPrev, onNext, onPressDay, register }: MonthPro
 
 type WeekProps = { period: Date; onPrev: () => void; onNext: () => void; onPressDay: PressDay; register: Register };
 
-// 주간 — 날짜 줄 + 평균 기상 · 목표 기상률 · 날마다 실행 점수 · AI 코칭. 주가 바뀌어도 앞 날짜 줄을 둔 채 새로 읽음
+// 주간 — 날짜 줄 + 평균 기상 · 목표 기상률 · 날마다 실행 점수(기상 기록이 있을 때) · AI 주간 요약(일기가 있을 때). 주가 바뀌어도 앞 날짜 줄을 둔 채 새로 읽음
+//   기상 통계와 AI 요약은 따로 — 기상 기록 · 알람이 없어도 일기가 있으면 AI 요약을 보여 주고, 둘 다 없을 때만 빈 문구
 function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps) {
   const { data, error, reload, emptyText } = useWeekRecord(period);
   useRegister(register, reload);
@@ -228,21 +219,21 @@ function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps
   return (
     <>
       <WeekStrip record={data} onPrev={onPrev} onNext={onNext} onPressDay={onPressDay} />
-      {data.summary ? (
-        <WeekSummaryCards summary={data.summary} relative={data.relative} onPressDay={onPressDay} />
-      ) : (
+      {data.summary ? <WeekSummaryCards summary={data.summary} onPressDay={onPressDay} /> : null}
+      {/* key = 주 — 주를 넘기면 새로 그려서, 다시 읽는 동안 · 실패했을 때 앞 주 글이 새 주 이름 아래 남지 않게 (useLoad는 앞 data를 남김) */}
+      {data.journalDays ? <WeekAi key={dayKey(weekStart(period))} period={period} journalKey={data.journalKey} relative={data.relative} /> : null}
+      {!data.summary && !data.journalDays ? (
         <Card>
           <Text variant="body" tone="sub">
             {emptyText}
           </Text>
         </Card>
-      )}
+      ) : null}
     </>
   );
 }
 
-function WeekSummaryCards({ summary: s, relative, onPressDay }: { summary: WeekSummary; relative: string; onPressDay: PressDay }) {
-  const today = useRecordToday();
+function WeekSummaryCards({ summary: s, onPressDay }: { summary: WeekSummary; onPressDay: PressDay }) {
   return (
     <>
       <View style={styles.stats}>
@@ -260,26 +251,57 @@ function WeekSummaryCards({ summary: s, relative, onPressDay }: { summary: WeekS
           </Text>
         ) : null}
       </Card>
-      {/* AI 코칭 글이 없으면(실데이터에서 그 주 일기가 없을 때) 카드를 접음 */}
-      {s.coaching ? (
-        <Card>
-          <Text variant="label" style={styles.label}>
-            {relative} AI 코칭
-          </Text>
-          <Text variant="reading">{s.coaching}</Text>
-          {/* 일기(A03)의 루틴 제안과 같은 화면(A04) — 오늘 기록을 바탕으로 만든 초안 */}
-          <View style={styles.coachAction}>
-            <Button
-              small
-              variant="ghost"
-              label="루틴 만들기"
-              onPress={() => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(today) } })}
-            />
-          </View>
-        </Card>
-      ) : null}
     </>
   );
+}
+
+type WeekAiProps = { period: Date; journalKey: string; relative: string; compact?: boolean };
+
+// AI 주간 요약 — 그 주 일기 글로 서버가 만든 글 + 대상 기간 · 반영된 기록 일수 + 루틴 만들기. 접힌 요약(compact)은 카드 안 한 칸, 주간은 카드 하나
+//   일기가 있는 주에서만 그림 (부르는 쪽이 journalDays로 거름). 못 읽으면 이 칸만 다시 시도 — 기상 통계는 그대로
+//   앱이 읽은 뒤 그 주 일기가 지워져 서버가 "요약할 일기 없음"(null)을 주면 칸을 비우지 않고 그렇게 알림
+function WeekAi({ period, journalKey, relative, compact }: WeekAiProps) {
+  const today = useRecordToday();
+  const { data, error, reload } = useWeekAiSummary(period, journalKey);
+  // 일기(A03)의 루틴 제안과 같은 화면(A04) — 오늘 기록을 바탕으로 만든 초안
+  const openRoutine = () => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(today) } });
+  const body = data ? (
+    <>
+      <Text variant="label">{relative} AI 주간 요약</Text>
+      <Text variant="caption">{`${data.period} · 기록 ${data.dayCount}일 반영`}</Text>
+      <Text variant={compact ? 'body' : 'reading'} style={styles.aiText}>
+        {data.text}
+      </Text>
+      {data.stale ? <Text variant="caption">최근 기록은 아직 반영하지 못했어요.</Text> : null}
+      {compact ? (
+        <View style={styles.digestLink}>
+          <TextLink label="루틴 만들기 ›" onPress={openRoutine} strong />
+        </View>
+      ) : (
+        <View style={styles.coachAction}>
+          <Button small variant="ghost" label="루틴 만들기" onPress={openRoutine} />
+        </View>
+      )}
+    </>
+  ) : data === null ? (
+    <Text variant="body" tone="sub">
+      {relative}에는 요약할 일기가 없어요.
+    </Text>
+  ) : error ? (
+    <>
+      <Text variant="body" tone="sub">
+        AI 주간 요약을 불러오지 못했어요.
+      </Text>
+      <View style={styles.digestLink}>
+        <TextLink label="다시 시도" onPress={() => void reload()} />
+      </View>
+    </>
+  ) : (
+    <Text variant="body" tone="sub" accessibilityLiveRegion="polite">
+      AI가 {relative} 기록을 정리하고 있어요…
+    </Text>
+  );
+  return compact ? <View style={styles.digestCoach}>{body}</View> : <Card>{body}</Card>;
 }
 
 // 숫자 하나 카드 (.stat)
@@ -388,6 +410,7 @@ const styles = StyleSheet.create({
   statValue: { marginVertical: 4 },
   note: { marginTop: 10 },
   coachAction: { marginTop: 12 },
+  aiText: { marginTop: 6 },
   todayRow: { marginBottom: 12 },
   digestWeek: { flexDirection: 'row', justifyContent: 'space-between' },
   digestCell: { flex: 1, alignItems: 'center', gap: 4, minHeight: 44 },
