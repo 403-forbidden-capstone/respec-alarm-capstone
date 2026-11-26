@@ -235,7 +235,7 @@ await check('기상 대본 캐시(wake_scripts): RLS 켜짐, 앱(anon · authent
     && x.on_delete === 'c' && /'AW'/.test(x.point_check) && /'AV'/.test(x.point_check) && /'LV'/.test(x.point_check) ? true : x;
 });
 
-await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정을 지우면 같이 지워짐 · 월요일만 · 잠금 함수는 서버만 · ai_calls에 WS 지점', async () => {
+await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정을 지우면 같이 지워짐 · 월요일만 · 잠금 함수는 서버만 · ai_calls에 WS 지점 · 내 시험 데이터 지우기에 지워짐', async () => {
   const [x] = await q(`select
     (select relrowsecurity from pg_class where oid='public.weekly_summaries'::regclass) as rls,
     has_table_privilege('anon', 'public.weekly_summaries', 'select') as anon_read,
@@ -247,8 +247,23 @@ await check('주간 요약 캐시(weekly_summaries): RLS 켜짐, 앱(anon · aut
     has_function_privilege('authenticated', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as client_claim,
     has_function_privilege('service_role', 'public.claim_weekly_summary(uuid, date, integer)', 'execute') as server_claim,
     (select pg_get_constraintdef(oid) from pg_constraint where conname = 'ai_calls_point_check') as point_check`);
+  // 내 시험 데이터 지우기 — 시험 계정(@example.com)의 주간 요약만 지움, 남의 줄은 그대로
+  const WS_ME = '6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b';
+  const WS_OTHER = '7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c';
+  await as(null, 'supabase_auth_admin');
+  await q(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'weekly-me@example.com', '{}'::jsonb), ($2, 'weekly-other@example.com', '{}'::jsonb)`, [WS_ME, WS_OTHER]);
+  await su();
+  const wsIns = (u) => q(`insert into public.weekly_summaries (user_id, week_start, input_hash, summary, day_dates, model) values ($1, '2026-11-23', 'h', '요약', array['2026-11-24']::date[], 'm')`, [u]);
+  await wsIns(WS_ME);
+  await wsIns(WS_OTHER);
+  await as(WS_ME);
+  await q(`select public.dev_reset_my_data()`);
+  await su();
+  const wsLeft = Object.fromEntries((await q(`select user_id::text as u, count(*)::int as n from public.weekly_summaries where user_id in ($1, $2) group by 1`, [WS_ME, WS_OTHER])).map((r) => [r.u, r.n]));
+  x.reset = wsLeft;
   return x.rls === true && !x.anon_read && !x.client_read && !x.client_insert && x.server_insert
-    && x.on_delete === 'c' && Number(x.monday) === 1 && !x.client_claim && x.server_claim && /'WS'/.test(x.point_check) && /'AW'/.test(x.point_check) ? true : x;
+    && x.on_delete === 'c' && Number(x.monday) === 1 && !x.client_claim && x.server_claim && /'WS'/.test(x.point_check) && /'AW'/.test(x.point_check)
+    && !wsLeft[WS_ME] && wsLeft[WS_OTHER] === 1 ? true : x;
 });
 
 await check('기기 키(briefing_devices): RLS 켜짐, 앱(anon · authenticated)은 못 읽고 못 씀, 서비스 역할만, 계정(profiles)을 지우면 같이 지워짐, 해시 모양만 · 해시 겹침 없음', async () => {
@@ -3459,7 +3474,7 @@ const mkAppt = async (creator, title, { group = null, series = null, on = null, 
 //   (user_blocks는 사용자 칸 이름이 blocker_id라 이 가드의 열 목록 밖 — 지움은 friend/ch15.mjs 15-타가 직접 봄)
 const RESET_DELETES = ['alarm_events', 'alarm_suggestions', 'alarms', 'appointment_participants', 'appointments', 'conversation_sessions',
                        'daily_journals', 'daily_records', 'friends', 'group_members', 'prepare_ml_verified_profiles', 'profiles', 'routine_suggestions', 'sharing_permissions', 'user_edit_logs', 'wake_hides',
-                       'wake_scripts'];   // wake_scripts = 알람이 지워질 때 FK(on delete cascade)로 같이 지워짐 — 함수는 안 고침
+                       'wake_scripts', 'weekly_summaries'];   // weekly_summaries = 함수가 내 줄을 지움(20261126130000). wake_scripts = 알람이 지워질 때 FK(on delete cascade)로 같이 지워짐 — 함수는 안 고침
 //   friend_links · rate_limit_events(친구 2장) · groups(남이 있는 그룹은 둠)는 둠, team_members(운영 화면 팀원)도 둠
 //   briefing_devices(기기 키)는 둠 — 시험 데이터 지우기는 로그인 그대로라 이 기기의 백그라운드 갱신이 계속 돌아야 함 (push_tokens와 같은 이유)
 //   server_route_users(서버 전환 스위치 canary 대상)는 시험 데이터가 아니라 운영 설정이라 둠
@@ -3483,6 +3498,7 @@ const MINE = {
   push_tickets: `select * from public.push_tickets where user_id = $1`,
   wake_hides: `select * from public.wake_hides where $1 in (owner_id, hidden_from_id)`,
   wake_scripts: `select * from public.wake_scripts where user_id = $1`,
+  weekly_summaries: `select * from public.weekly_summaries where user_id = $1`,
   briefing_devices: `select * from public.briefing_devices where user_id = $1`,
   alarm_proposals: `select * from public.alarm_proposals where $1 in (owner_id, proposer_id)`,
   push_tokens: `select * from public.push_tokens where user_id = $1`,
