@@ -832,6 +832,8 @@ describe('외국 글자 섞임', () => {
   it('못 고쳐도 원문에 글자 그대로 있는 낱말(이미 저장된 깨진 이름 · 받아쓰기)은 그대로 둠 — 매번 실패하지 않게', () => {
     assert.deepEqual(fix('캡ス톤 회의는 내일 11시예요', '[기존 일정]\n- 캡ス톤 회의\n사용자: 내일 회의 몇 시?'), { title: '캡ス톤 회의는 내일 11시예요', left: [], fixed: 0 });
     assert.deepEqual(fix('캡ス톤 회의', '사용자: 캡ス톤 회의 있어'), { title: '캡ス톤 회의', left: [], fixed: 0 });
+    const db = '[기존 일정]\n- 캡ス톤 회의\n사용자: 내일 회의 몇 시?';
+    for (const s of ["'캡ス톤 회의' 11시예요", '"캡ス톤 회의"', '(캡ス톤 회의)', '캡ス톤에서 봐요']) assert.deepEqual(fix(s, db), { title: s, left: [], fixed: 0 }, s);
   });
   it('원문에 맞는 낱말이 없거나 끝에 붙으면 못 고침 (다시 만들기로)', () => {
     assert.deepEqual(fix('會議', user).left, ['會', '議']);

@@ -427,7 +427,8 @@ const sandwiched = (s: string, at: number, len: number): boolean => isHangul(s[a
  * 허용: 원문에 있는 외국 글자(사용자가 쓴 이름 · DB에 있는 외국어 이름), 단 한글 사이에 끼인 것은 늘 섞임.
  * 고치기: 끼인 덩어리 앞뒤 한글 줄기로 만든 틀("캡[가-힣]톤에서" → "캡[가-힣]톤에" → "캡[가-힣]톤")이 원문에서 한 가지 글자로만
  *   맞으면 그 덩어리만 바꿈 (뒤에 붙은 조사 · 문장부호는 출력 그대로). 끝에 붙은 것("회의ス")은 틀이 엉뚱하게 맞을 수 있어 안 고침.
- * 못 고쳐도 낱말이 원문에 글자 그대로 있으면(이미 DB에 저장된 깨진 이름을 옮김) 그대로 둠 — 막으면 그 이름이 나올 때마다 실패.
+ * 못 고쳐도 끼인 덩어리가 원문에 앞뒤 글자까지 그대로 있으면(이미 DB에 저장된 깨진 이름 · 바른 이름이 없는 받아쓰기 오류를 옮김)
+ *   그대로 둠 — 막으면 그 이름이 나올 때마다 실패.
  * left = 못 고친 글자 (있으면 다시 만들기 · 실패)
  */
 export function fixStray(data: unknown, source: string): { data: unknown; left: string[]; fixed: number } {
@@ -450,19 +451,25 @@ export function fixStray(data: unknown, source: string): { data: unknown; left: 
       const out = word.replace(FOREIGN_RUN, (run: string, at: number) => {
         const inside = sandwiched(word, at, run.length);
         if (!inside && [...run].every((c) => allowed.has(c))) return run;
-        const to = inside ? fixRun(run, /[가-힣]+$/.exec(word.slice(0, at))![0], /^[가-힣]+/.exec(word.slice(at + run.length))![0]) : null;
-        if (to === null) {
+        if (!inside) {
           failed = true;
           return run;
         }
-        runs++;
-        return to;
+        const before = /[가-힣]+$/.exec(word.slice(0, at))![0];
+        const after = /^[가-힣]+/.exec(word.slice(at + run.length))![0];
+        const to = fixRun(run, before, after);
+        if (to !== null) {
+          runs++;
+          return to;
+        }
+        // 못 고쳐도 원문에 글자 그대로 있는 덩어리(이미 저장된 깨진 이름 · 받아쓰기 그대로)는 둠 — 따옴표 · 조사가 붙어도
+        if (!source.includes(before + run + after[0])) failed = true;
+        return run;
       });
       if (!failed) {
         fixed += runs;
         return out;
       }
-      if (source.includes(word)) return word;
       for (const c of word.match(FOREIGN_SCRIPT) ?? []) left.add(c);
       return word;
     });
