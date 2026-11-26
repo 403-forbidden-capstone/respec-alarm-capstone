@@ -822,9 +822,16 @@ describe('외국 글자 섞임', () => {
     assert.deepEqual(fix('가・나', user), { title: '가・나', left: [], fixed: 0 });
     assert.deepEqual(fix('캡스톤 회의', user), { title: '캡스톤 회의', left: [], fixed: 0 });
   });
-  it('받아쓰기가 깨진 말("캡ス톤")은 원문에 있어도 허용하지 않음 — 컨텍스트에 맞는 이름이 있으면 그걸로', () => {
-    assert.deepEqual(fix('캡ス톤 회의', '사용자: 캡ス톤 회의 있어').left, ['ス']);
+  it('받아쓰기가 깨진 말("캡ス톤")은 컨텍스트에 맞는 이름이 있으면 그걸로 고침', () => {
     assert.deepEqual(fix('캡ス톤 회의', '[a1] 캡스톤 회의\n사용자: 캡ス톤 회의 11시로'), { title: '캡스톤 회의', left: [], fixed: 1 });
+  });
+  it('조사 · 문장부호가 붙어도 끼인 덩어리만 고침', () => {
+    assert.deepEqual(fix('캡ス톤에서 봐요', user), { title: '캡스톤에서 봐요', left: [], fixed: 1 });
+    assert.deepEqual(fix('캡ス톤, 회의', user), { title: '캡스톤, 회의', left: [], fixed: 1 });
+  });
+  it('못 고쳐도 원문에 글자 그대로 있는 낱말(이미 저장된 깨진 이름 · 받아쓰기)은 그대로 둠 — 매번 실패하지 않게', () => {
+    assert.deepEqual(fix('캡ス톤 회의는 내일 11시예요', '[기존 일정]\n- 캡ス톤 회의\n사용자: 내일 회의 몇 시?'), { title: '캡ス톤 회의는 내일 11시예요', left: [], fixed: 0 });
+    assert.deepEqual(fix('캡ス톤 회의', '사용자: 캡ス톤 회의 있어'), { title: '캡ス톤 회의', left: [], fixed: 0 });
   });
   it('원문에 맞는 낱말이 없거나 끝에 붙으면 못 고침 (다시 만들기로)', () => {
     assert.deepEqual(fix('會議', user).left, ['會', '議']);
@@ -843,7 +850,7 @@ describe('외국 글자 섞임', () => {
 
   it('못 고치면 다시 만들어 고친 답을 씀 — 시도 · 시간은 합쳐 기록', async () => {
     const t = setup([response([text(t1('會議 잡을게요.'))]), response([text(t1('회의 잡을게요.'))])]);
-    const r = await callLlm<{ reply: string }>(t.client, baseOpts({ user, now: t.extra.now }));
+    const r = await callLlm<{ reply: string }>(t.client, baseOpts({ user, now: t.extra.now, deadlineMs: 60_000 }));
     assert.equal(r.ok, true);
     if (!r.ok) return;
     assert.equal(r.data.reply, '회의 잡을게요.');
@@ -855,9 +862,16 @@ describe('외국 글자 섞임', () => {
 
   it('다시 만들어도 섞이면 BAD_OUTPUT (카드 · 저장으로 안 감)', async () => {
     const t = setup([response([text(t1('會議'))]), response([text(t1('會議'))])]);
-    const f = mustFail(await callLlm(t.client, baseOpts({ user, now: t.extra.now })));
+    const f = mustFail(await callLlm(t.client, baseOpts({ user, now: t.extra.now, deadlineMs: 60_000 })));
     assert.equal(f.code, 'BAD_OUTPUT');
     assert.equal(t.calls.length, 2);
+  });
+
+  it('마감이 없는 호출(T2 · T5 등)은 다시 만들지 않고 바로 실패 길로 — 최악 시간이 두 배가 되지 않게', async () => {
+    const t = setup([response([text(t1('會議'))])]);
+    const f = mustFail(await callLlm(t.client, baseOpts({ user, now: t.extra.now })));
+    assert.equal(f.code, 'BAD_OUTPUT');
+    assert.equal(t.calls.length, 1);
   });
 
   it('마감이 모자라면 다시 만들지 않음', async () => {

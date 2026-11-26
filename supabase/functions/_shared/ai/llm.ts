@@ -425,7 +425,9 @@ const sandwiched = (s: string, at: number, len: number): boolean => isHangul(s[a
 /**
  * 출력(JSON) 글 칸의 섞인 외국 글자를 원문(source = 사용자 말 + 컨텍스트의 DB 이름)으로 고친다.
  * 허용: 원문에 있는 외국 글자(사용자가 쓴 이름 · DB에 있는 외국어 이름), 단 한글 사이에 끼인 것은 늘 섞임.
- * 고치기: 섞인 덩어리를 같은 길이 한글로 본 낱말 틀("캡[가-힣]톤")이 원문에서 한 가지로만 맞으면 그 낱말로 바꿈.
+ * 고치기: 끼인 덩어리 앞뒤 한글 줄기로 만든 틀("캡[가-힣]톤에서" → "캡[가-힣]톤에" → "캡[가-힣]톤")이 원문에서 한 가지 글자로만
+ *   맞으면 그 덩어리만 바꿈 (뒤에 붙은 조사 · 문장부호는 출력 그대로). 끝에 붙은 것("회의ス")은 틀이 엉뚱하게 맞을 수 있어 안 고침.
+ * 못 고쳐도 낱말이 원문에 글자 그대로 있으면(이미 DB에 저장된 깨진 이름을 옮김) 그대로 둠 — 막으면 그 이름이 나올 때마다 실패.
  * left = 못 고친 글자 (있으면 다시 만들기 · 실패)
  */
 export function fixStray(data: unknown, source: string): { data: unknown; left: string[]; fixed: number } {
@@ -433,23 +435,34 @@ export function fixStray(data: unknown, source: string): { data: unknown; left: 
   for (const m of source.matchAll(FOREIGN_RUN)) if (!sandwiched(source, m.index, m[0].length)) for (const c of m[0]) allowed.add(c);
   const left = new Set<string>();
   let fixed = 0;
+  const fixRun = (run: string, before: string, after: string): string | null => {
+    for (let n = after.length; n >= 1; n--) {
+      const hits = new Set([...source.matchAll(new RegExp(`${before}([가-힣]{${run.length}})${after.slice(0, n)}`, 'g'))].map((m) => m[1]));
+      if (hits.size === 1) return [...hits][0];
+      if (hits.size > 1) return null; // 줄기를 더 줄이면 더 여럿이 맞음
+    }
+    return null;
+  };
   const fixString = (s: string): string =>
     s.replace(/\S+/g, (word) => {
-      let bad = false;
-      let fixable = true; // 끼인 것만 틀로 고침 — 끝에 붙은 것("회의ス")은 틀이 '회의가'처럼 엉뚱하게 맞을 수 있어 다시 만들기로
-      const pattern = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(FOREIGN_RUN, (run: string, at: number, esc: string) => {
-        const inside = sandwiched(esc, at, run.length);
-        if (![...run].some((c) => !allowed.has(c)) && !inside) return run;
-        bad = true;
-        if (!inside) fixable = false;
-        return `[가-힣]{${run.length}}`;
+      let failed = false;
+      let runs = 0;
+      const out = word.replace(FOREIGN_RUN, (run: string, at: number) => {
+        const inside = sandwiched(word, at, run.length);
+        if (!inside && [...run].every((c) => allowed.has(c))) return run;
+        const to = inside ? fixRun(run, /[가-힣]+$/.exec(word.slice(0, at))![0], /^[가-힣]+/.exec(word.slice(at + run.length))![0]) : null;
+        if (to === null) {
+          failed = true;
+          return run;
+        }
+        runs++;
+        return to;
       });
-      if (!bad) return word;
-      const hits = fixable ? new Set(source.match(new RegExp(pattern, 'g')) ?? []) : new Set<string>();
-      if (hits.size === 1) {
-        fixed++;
-        return [...hits][0];
+      if (!failed) {
+        fixed += runs;
+        return out;
       }
+      if (source.includes(word)) return word;
       for (const c of word.match(FOREIGN_SCRIPT) ?? []) left.add(c);
       return word;
     });
@@ -463,13 +476,14 @@ export function fixStray(data: unknown, source: string): { data: unknown; left: 
   return { data: out, left: [...left], fixed };
 }
 
-// 외국 글자가 섞인 답은 한 번 다시 만들게 함 (남은 마감 안에서만). 또 섞이면 BAD_OUTPUT — 카드 · DB로 가지 않음
+// 외국 글자가 섞인 답은 한 번 다시 만들게 함 — 마감(deadlineMs)이 있는 호출만, 남은 시간 안에서. 또 섞이면 BAD_OUTPUT — 카드 · DB로 가지 않음
+// 마감이 없는 호출(T2 · T5 · 기상 대본 · 주간 요약)은 다시 만들면 최악 시간이 두 배라(voice-commit 앱 45초) 바로 실패 길로
 export async function callLlm<T = unknown>(client: LlmClient | null, opts: CallOpts): Promise<LlmResult<T>> {
   const first = await callOnce<T>(client, opts);
-  if (first.ok || !first.call.flags.includes(STRAY_FLAG)) return first;
-  const left = opts.deadlineMs === undefined ? undefined : opts.deadlineMs - first.call.latency_ms;
-  if (left !== undefined && left < Math.min(opts.timeoutMs, RETRY_MIN_ATTEMPT_MS)) return first;
-  const second = await callOnce<T>(client, left === undefined ? opts : { ...opts, deadlineMs: left, timeoutMs: Math.min(opts.timeoutMs, left) });
+  if (first.ok || !first.call.flags.includes(STRAY_FLAG) || opts.deadlineMs === undefined) return first;
+  const left = opts.deadlineMs - first.call.latency_ms;
+  if (left < Math.min(opts.timeoutMs, RETRY_MIN_ATTEMPT_MS)) return first;
+  const second = await callOnce<T>(client, { ...opts, deadlineMs: left, timeoutMs: Math.min(opts.timeoutMs, left) });
   // 호출 기록 한 줄에 두 번 모두 — 시간 · 횟수 · 비용을 더하고 다시 만든 표시
   const c = second.call;
   c.latency_ms += first.call.latency_ms;
