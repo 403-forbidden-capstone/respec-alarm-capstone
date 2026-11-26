@@ -136,6 +136,15 @@ function Wheel({ label, options, value, onChange, loop = false }: WheelProps) {
   );
 }
 
+export function changeWheelTime(value: Date, part: 'hour' | 'minute' | 'period', index: number): Date {
+  const current = minuteOfDay(value);
+  const h = Math.floor(current / 60);
+  const m = current % 60;
+  const nextHour = part === 'hour' ? ((index + 1) % 12) + (h >= 12 ? 12 : 0)
+    : part === 'period' ? h % 12 + index * 12 : h;
+  return addMinutes(startOfDay(value), nextHour * 60 + (part === 'minute' ? index : m));
+}
+
 export function AlarmWheelPicker({ value, onChange }: { value: Date; onChange: (next: Date) => void }) {
   const latest = useRef(value);
   latest.current = value;
@@ -143,12 +152,7 @@ export function AlarmWheelPicker({ value, onChange }: { value: Date; onChange: (
   const hour = Math.floor(minute / 60);
   // 두 열을 빠르게 연달아 움직여도 직전에 선택한 다른 열의 값을 유지한다.
   const update = (part: 'hour' | 'minute' | 'period', index: number) => {
-    const current = minuteOfDay(latest.current);
-    const h = Math.floor(current / 60);
-    const m = current % 60;
-    const nextHour = part === 'hour' ? ((index + 1) % 12) + (h >= 12 ? 12 : 0)
-      : part === 'period' ? h % 12 + index * 12 : h;
-    const next = addMinutes(startOfDay(latest.current), nextHour * 60 + (part === 'minute' ? index : m));
+    const next = changeWheelTime(latest.current, part, index);
     latest.current = next;
     onChange(next);
   };
