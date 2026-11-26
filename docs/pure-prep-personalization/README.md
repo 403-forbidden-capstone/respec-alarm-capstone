@@ -1,5 +1,9 @@
 # Re:Spec Alarm — 순수준비시간 개인화 작동 원리
 
+**공개 인터랙티브 페이지**: https://gomrhctwjvttoqifxktt.supabase.co/functions/v1/pure-prep-explainer
+
+웹페이지는 공개 읽기 전용 Supabase Edge Function `pure-prep-explainer`에서 HTML/CSS/JS로 제공됩니다. 이 함수는 기존 알람 API와 분리되어 있고 DB에 접근하지 않습니다.
+
 웹페이지: [index.html](./index.html)
 
 2026-11-26 기능 설명·합성 기록 E2E 데모. 전체 페이지는 HTML/CSS/JS 단일 파일이며 외부 패키지, 인증, Supabase API 호출, 브라우저 저장, 가짜 기록의 운영 DB 삽입이 없습니다.
