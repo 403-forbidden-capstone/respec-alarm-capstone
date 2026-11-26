@@ -1,10 +1,11 @@
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Button, Segmented, Text } from '@/components/ui';
+import { Button, Text } from '@/components/ui';
 import { draftAt } from '@/features/alarm/schedule';
 import { IMPORTANCE_LABEL, KIND_LABEL, TRANSPORT_LABEL } from '@/features/alarm/types';
 import { formatDateParen, formatTime } from '@/lib/format';
-import { colors } from '@/theme';
+import { useSkyTone } from '@/lib/skyTone';
+import { colors, radius, size } from '@/theme';
 
 import type { ApptChanges, ConversationCard } from '../types';
 import { Bubble, BubbleTime } from './ChatBubble';
@@ -119,11 +120,11 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
                 ? '그룹 일정인지 개인 일정인지 골라 주세요'
                 : '알람은 내 것만 맞춰요'}
           </Text>
-          <Segmented
+          <GroupPicker
             options={groupOptions}
             value={group.choice === 'GROUP' ? (group.id ?? UNPICKED) : group.choice === 'PERSONAL' ? PERSONAL : UNPICKED}
             onChange={(v) => onPickGroup(v === PERSONAL ? null : v)}
-            disabled={blocked ? groupOptions.map(([v]) => v) : undefined}
+            disabled={blocked}
           />
         </View>
       ) : null}
@@ -168,6 +169,34 @@ export function FoundScheduleCard({ card, at, onSave, onReject, onEdit, onPickPl
   );
 }
 
+// 그룹 · 개인 일정 칩 — 공용 Segmented보다 낮고, 고른 칩은 그 시각 하늘의 포인트 색 (lib/skyTone). 이름이 길면 줄을 바꿔 카드 안에 둠
+const PICK_SLOP = { top: (size.touch - size.chip - 6) / 2, bottom: (size.touch - size.chip - 6) / 2 } as const;
+function GroupPicker({ options, value, onChange, disabled }: { options: readonly (readonly [string, string])[]; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const { base, accent } = useSkyTone();
+  return (
+    <View style={[styles.pick, { backgroundColor: base }]} accessibilityRole="tablist">
+      {options.map(([v, label]) => {
+        const on = v === value;
+        return (
+          <Pressable
+            key={v}
+            onPress={() => onChange(v)}
+            disabled={disabled}
+            hitSlop={PICK_SLOP}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on, disabled }}
+            style={[styles.pickItem, on && { backgroundColor: accent }, disabled && styles.pickOff]}
+          >
+            <Text variant="note" tone={on ? 'inverse' : 'sub'} weight={on ? 600 : 400} align="center">
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function Row({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <View style={styles.row}>
@@ -205,4 +234,17 @@ const styles = StyleSheet.create({
   result: { marginTop: 6 },
   group: { marginTop: 8 },
   groupNote: { marginBottom: 6 },
+  pick: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, padding: 3, borderRadius: radius.chip },
+  pickItem: {
+    flexGrow: 1,
+    flexShrink: 1,
+    maxWidth: '100%',
+    minHeight: size.chip + 6,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: radius.chip - 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickOff: { opacity: 0.35 }, // Button의 disabled와 같은 흐림
 });
