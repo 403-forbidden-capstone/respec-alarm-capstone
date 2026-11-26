@@ -3985,4 +3985,7 @@ await check('PURE-PREP-03: 순수준비시간 변경 시각은 서버만 기록,
 });
 
 
+// Candidate policy runs after the existing compatibility checks on the disposable DB.
+await (await import('./group-common-sharing.mjs')).default({ ...FRIEND_CTX, execSql: (sql) => db.exec(sql) });
+
 report();
