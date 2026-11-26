@@ -18,13 +18,17 @@ function fakeModel() {
   const seen: LlmRequest[] = [];
   let fail = false;
   let gate: Promise<void> | null = null; // 있으면 모델 답을 이 약속이 끝날 때까지 늦춤 (동시 요청 시험)
+  const plan: { gate: Promise<void>; empty?: boolean }[] = []; // 다음 호출 하나만 늦추거나 실패시킴 (넣은 차례대로)
   const client: LlmClient = {
     async create(params): Promise<LlmResponse> {
       seen.push(params);
-      if (gate) await gate;
+      const n = seen.length; // 글 번호는 요청한 차례
+      const step = plan.shift();
+      if (step) await step.gate;
+      else if (gate) await gate;
       if (fail) throw new LlmClientError('server', 'fake 5xx', { status: 500 });
       return {
-        content: [{ type: 'text', text: JSON.stringify({ summary: `**요약 ${seen.length}**  이번 주 기록을 돌아봤어요.` }) }],
+        content: [{ type: 'text', text: JSON.stringify({ summary: step?.empty ? ' ' : `**요약 ${n}**  이번 주 기록을 돌아봤어요.` }) }],
         stop_reason: 'end_turn',
         usage: { input_tokens: 300, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
         model: 'gemini-3.5-flash-lite',
@@ -32,7 +36,13 @@ function fakeModel() {
       };
     },
   };
-  return { client, seen, failNext: (v: boolean) => void (fail = v), hold: (p: Promise<void> | null) => void (gate = p) };
+  // 다음 호출 하나를 멈춰 두고, 돌려준 함수를 부르면 답함 (empty면 빈 글 — 다시 시도 없이 LLM_UNAVAILABLE)
+  const holdNext = (o: { empty?: boolean } = {}) => {
+    let open!: () => void;
+    plan.push({ gate: new Promise<void>((done) => (open = done)), empty: o.empty });
+    return open;
+  };
+  return { client, seen, failNext: (v: boolean) => void (fail = v), hold: (p: Promise<void> | null) => void (gate = p), holdNext };
 }
 
 // claim_weekly_summary 흉내 (마이그레이션 20261126120000 — 줄이 없으면 잠금만 든 줄, 잠금이 비었거나 지났으면 잡음)
@@ -236,6 +246,98 @@ describe('weekly-summary — 동시 요청', () => {
     const [prev, cur] = await Promise.all([t.run(PREV), t.run(WEEK)]);
     assert.equal(t.model.seen.length, 2);
     assert.deepEqual([prev.dates, cur.dates], [['2026-11-17'], ['2026-11-24']]);
+  });
+});
+
+describe('weekly-summary — 잠금 주인 · 만드는 사이 바뀐 기록', () => {
+  const tick = () => new Promise((done) => setTimeout(done, 20));
+  const row = (t: ReturnType<typeof setup>) => t.db.rows('weekly_summaries').find((r) => r.week_start === WEEK)!;
+  const code = (p: Promise<unknown>) => p.then(() => 'ok', (e: HttpError) => e.code);
+
+  it('잠금이 지나 다른 요청이 새로 잡으면, 늦게 끝난 앞 요청은 그 잠금을 풀거나 글을 덮지 않음', async () => {
+    const t = setup();
+    t.journal('2026-11-24', '화요일');
+    const openA = t.model.holdNext();
+    const a = t.run();
+    await tick();
+    row(t).claimed_until = new Date(Date.now() - 1000).toISOString(); // A의 잠금이 지남 (모델이 30초를 넘김)
+    const openB = t.model.holdNext();
+    const b = t.run();
+    await tick();
+    const lockB = row(t).claimed_until;
+    assert.ok(lockB && Date.parse(lockB as string) > Date.now());
+    openA();
+    const ra = await a;
+    assert.equal(ra.summary, '요약 1 이번 주 기록을 돌아봤어요.'); // 지금 기록으로 만든 글이라 돌려는 줌
+    assert.equal(row(t).claimed_until, lockB); // B의 잠금 그대로
+    assert.equal(row(t).summary, null); // A는 저장 안 함
+    openB();
+    const rb = await b;
+    assert.equal(rb.summary, '요약 2 이번 주 기록을 돌아봤어요.');
+    assert.deepEqual([row(t).summary, row(t).claimed_until], ['요약 2 이번 주 기록을 돌아봤어요.', null]);
+  });
+
+  it('잠금을 잃은 요청이 실패해도 다른 요청의 잠금은 그대로', async () => {
+    const t = setup();
+    t.journal('2026-11-24', '화요일');
+    const openA = t.model.holdNext({ empty: true });
+    const a = code(t.run());
+    await tick();
+    row(t).claimed_until = new Date(Date.now() - 1000).toISOString();
+    const openB = t.model.holdNext();
+    const b = t.run();
+    await tick();
+    const lockB = row(t).claimed_until;
+    openA();
+    assert.equal(await a, 'LLM_UNAVAILABLE');
+    assert.equal(row(t).claimed_until, lockB);
+    openB();
+    assert.equal((await b).stale, false);
+  });
+
+  it('만드는 사이 일기를 고치면 옛 글을 저장하지 않고, 다음 요청이 고친 글로 다시 만듦', async () => {
+    const t = setup();
+    t.journal('2026-11-24', '화요일');
+    const open = t.model.holdNext();
+    const a = code(t.run());
+    await tick();
+    Object.assign(t.db.rows('daily_journals')[0], { edited_summary: '화요일 고침', is_edited: true });
+    open();
+    assert.equal(await a, 'CONFLICT'); // 저장된 글도 없어서
+    assert.deepEqual([row(t).summary, row(t).claimed_until], [null, null]); // 저장 안 하고 잠금만 풂
+    const again = await t.run();
+    assert.equal(t.userInput().days[0].text, '화요일 고침');
+    assert.equal(again.stale, false);
+    assert.equal(row(t).summary, again.summary);
+  });
+
+  it('저장된 요약이 있는데 만드는 사이 일기가 바뀌면 저장된 글을 stale로 (새 글 저장 안 함)', async () => {
+    const t = setup();
+    t.journal('2026-11-24', '화요일');
+    const first = await t.run();
+    t.journal('2026-11-25', '수요일');
+    const open = t.model.holdNext();
+    const a = t.run();
+    await tick();
+    t.journal('2026-11-26', '목요일');
+    open();
+    const r = await a;
+    assert.deepEqual([r.summary, r.dates, r.stale], [first.summary, ['2026-11-24'], true]);
+    assert.equal(row(t).summary, first.summary);
+  });
+
+  it('만드는 사이 그 주 일기를 모두 지우면 저장하지 않고, 다음 요청은 null · 줄 삭제', async () => {
+    const t = setup();
+    t.journal('2026-11-24', '화요일');
+    const open = t.model.holdNext();
+    const a = code(t.run());
+    await tick();
+    t.db.tables.daily_journals = [];
+    open();
+    assert.equal(await a, 'CONFLICT');
+    const again = await t.run();
+    assert.deepEqual([again.summary, again.dates], [null, []]);
+    assert.equal(t.db.rows('weekly_summaries').length, 0);
   });
 });
 

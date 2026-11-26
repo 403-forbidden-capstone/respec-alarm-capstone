@@ -59,6 +59,7 @@ export type WeekRecord = {
   strip: WeekDay[]; // 월 ~ 일
   summary: WeekSummary | null; // 기상 통계 — 점수를 낼 기상 기록이 없는 주는 null
   journalDays: number; // 글이 있는 일기 수 — 0이 아니면 AI 주간 요약을 읽음
+  journalKey: string; // 그 주 일기 날짜 · 글 지문 — 바뀌면(새로고침에서 글만 고친 경우 포함) AI 요약을 다시 읽음
 };
 
 export type TimelineRow = { at: Date; label: string; source: string; past?: boolean };

@@ -2,6 +2,7 @@
 // 실데이터 구현의 틀(features/alarm/map.ts와 같음): 쿼리는 real.ts에서 얇게, 행 → 화면 모양 변환은 여기서 순수 함수로
 import { KIND_LABEL, LEVELS, type Level } from '@/features/alarm/types';
 import { dbTimeMs, parseDbTime } from '@/lib/dbTime';
+import { stableUuid } from '@/lib/uuid';
 import { addMinutes, dayKey, formatDateShort, josa, minutesBetween, startOfDay } from '@/lib/format';
 import type { Enums, Tables, TablesUpdate } from '@/types/database';
 import { levelOfIntensity, levelOfSoundKey, levelOfVoiceTone } from '@shared/calc/intensity.ts';
@@ -49,8 +50,13 @@ export function wakeRowsOf(days: readonly Date[], records: readonly RecordRow[],
   });
 }
 
-// 글이 있는 일기인지 — 고쳤으면 고친 글 (routine/map.ts 일기 화면 · 서버 weekly-summary journalText와 같은 규칙). 주간 AI 요약은 이런 날만 씀
-export const hasJournalText = (j: JournalDayRow): boolean => !!(j.is_edited && j.edited_summary != null ? j.edited_summary : j.ai_summary)?.trim();
+// 그날 보여 주는 일기 글 — 고쳤으면 고친 글 (routine/map.ts 일기 화면 · 서버 weekly-summary journalText와 같은 규칙)
+const journalText = (j: JournalDayRow): string => ((j.is_edited && j.edited_summary != null ? j.edited_summary : j.ai_summary) ?? '').trim();
+// 글이 있는 일기인지 — 주간 AI 요약은 이런 날만 씀
+export const hasJournalText = (j: JournalDayRow): boolean => journalText(j) !== '';
+// 그 주 일기 글 지문 — 날짜 · 글이 하나라도 바뀌면 달라짐 (일수가 같아도 글만 고치면 달라져 AI 요약을 다시 읽음). 글이 없는 날은 뺌
+export const journalKeyOf = (journals: readonly JournalDayRow[]): string =>
+  stableUuid(...journals.filter(hasJournalText).sort((a, b) => a.record_date.localeCompare(b.record_date)).flatMap((j) => [j.record_date, journalText(j)]));
 
 // ---------------------------------------------------------------------------
 // 일간 (alarms 설정한 값 + alarm_events 실제로 일어난 일)

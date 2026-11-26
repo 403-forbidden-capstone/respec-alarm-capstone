@@ -510,4 +510,15 @@ describe('R02 주간 AI 요약 — 기상 기록과 분리', () => {
     mockCallEdge.mockResolvedValueOnce({ week_start: '2026-10-19', week_end: '2026-10-25', dates: [], summary: null, generated_at: null, stale: false });
     expect(await getWeekAiSummary(new Date('2026-10-19T03:00:00Z'))).toBeNull();
   });
+
+  it('같은 일수에서 일기 글만 고치면 주간 기록의 일기 지문이 바뀜 (새로고침 때 AI 요약을 다시 읽는 기준)', async () => {
+    let text = '수요일 일기';
+    reply((c) => (c.table === 'daily_journals' ? { data: [journal('2026-10-21', text)] } : { data: [] }));
+    const before = await getWeek(new Date('2026-10-21T03:00:00Z'));
+    text = '수요일 일기 (고침)';
+    const after = await getWeek(new Date('2026-10-21T03:00:00Z'));
+    expect([before.journalDays, after.journalDays]).toEqual([1, 1]);
+    expect(after.journalKey).not.toBe(before.journalKey);
+    expect((await getWeek(new Date('2026-10-21T03:00:00Z'))).journalKey).toBe(after.journalKey);
+  });
 });

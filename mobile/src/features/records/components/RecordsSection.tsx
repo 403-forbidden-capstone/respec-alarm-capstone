@@ -144,7 +144,7 @@ function WeekDigest({ today, onPressDay, register }: { today: Date; onPressDay: 
           </View>
         </View>
       ) : null}
-      {data.journalDays ? <WeekAi key={dayKey(weekStart(today))} period={today} journalDays={data.journalDays} relative={data.relative} compact /> : null}
+      {data.journalDays ? <WeekAi key={dayKey(weekStart(today))} period={today} journalKey={data.journalKey} relative={data.relative} compact /> : null}
       {!s && !data.journalDays ? (
         <Text variant="body" tone="sub" style={styles.digestEmpty}>
           {emptyText}
@@ -221,7 +221,7 @@ function WeekSection({ period, onPrev, onNext, onPressDay, register }: WeekProps
       <WeekStrip record={data} onPrev={onPrev} onNext={onNext} onPressDay={onPressDay} />
       {data.summary ? <WeekSummaryCards summary={data.summary} onPressDay={onPressDay} /> : null}
       {/* key = 주 — 주를 넘기면 새로 그려서, 다시 읽는 동안 · 실패했을 때 앞 주 글이 새 주 이름 아래 남지 않게 (useLoad는 앞 data를 남김) */}
-      {data.journalDays ? <WeekAi key={dayKey(weekStart(period))} period={period} journalDays={data.journalDays} relative={data.relative} /> : null}
+      {data.journalDays ? <WeekAi key={dayKey(weekStart(period))} period={period} journalKey={data.journalKey} relative={data.relative} /> : null}
       {!data.summary && !data.journalDays ? (
         <Card>
           <Text variant="body" tone="sub">
@@ -255,13 +255,14 @@ function WeekSummaryCards({ summary: s, onPressDay }: { summary: WeekSummary; on
   );
 }
 
-type WeekAiProps = { period: Date; journalDays: number; relative: string; compact?: boolean };
+type WeekAiProps = { period: Date; journalKey: string; relative: string; compact?: boolean };
 
 // AI 주간 요약 — 그 주 일기 글로 서버가 만든 글 + 대상 기간 · 반영된 기록 일수 + 루틴 만들기. 접힌 요약(compact)은 카드 안 한 칸, 주간은 카드 하나
 //   일기가 있는 주에서만 그림 (부르는 쪽이 journalDays로 거름). 못 읽으면 이 칸만 다시 시도 — 기상 통계는 그대로
-function WeekAi({ period, journalDays, relative, compact }: WeekAiProps) {
+//   앱이 읽은 뒤 그 주 일기가 지워져 서버가 "요약할 일기 없음"(null)을 주면 칸을 비우지 않고 그렇게 알림
+function WeekAi({ period, journalKey, relative, compact }: WeekAiProps) {
   const today = useRecordToday();
-  const { data, error, reload } = useWeekAiSummary(period, journalDays);
+  const { data, error, reload } = useWeekAiSummary(period, journalKey);
   // 일기(A03)의 루틴 제안과 같은 화면(A04) — 오늘 기록을 바탕으로 만든 초안
   const openRoutine = () => router.push({ pathname: '/routine/[id]', params: { id: 'new', journal: dayKey(today) } });
   const body = data ? (
@@ -282,7 +283,11 @@ function WeekAi({ period, journalDays, relative, compact }: WeekAiProps) {
         </View>
       )}
     </>
-  ) : data === null ? null : error ? (
+  ) : data === null ? (
+    <Text variant="body" tone="sub">
+      {relative}에는 요약할 일기가 없어요.
+    </Text>
+  ) : error ? (
     <>
       <Text variant="body" tone="sub">
         AI 주간 요약을 불러오지 못했어요.
@@ -296,7 +301,6 @@ function WeekAi({ period, journalDays, relative, compact }: WeekAiProps) {
       AI가 {relative} 기록을 정리하고 있어요…
     </Text>
   );
-  if (!body) return null;
   return compact ? <View style={styles.digestCoach}>{body}</View> : <Card>{body}</Card>;
 }
 

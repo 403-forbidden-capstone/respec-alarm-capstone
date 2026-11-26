@@ -7,6 +7,7 @@ import { now } from '@/lib/clock';
 import { UserError } from '@/lib/errors';
 import { addDays, dateParts, dayKey, isSameDay, startOfDay } from '@/lib/format';
 import { isMock } from '@/lib/mode';
+import { stableUuid } from '@/lib/uuid';
 import { alarmChain } from '@/mocks/calc';
 import { db, kst, TODAY } from '@/mocks/data';
 import { pastDay } from '@/mocks/records';
@@ -79,10 +80,10 @@ function weekSummary(days: Date[], relative: string): WeekSummary | null {
   });
 }
 
-// 그 주 글이 있는 일기 수 — 목업 일기(routine/api getJournal)
-async function journalDaysOf(days: Date[]): Promise<number> {
-  const journals = await Promise.all(days.map((d) => getJournal(dayKey(d))));
-  return journals.filter((j) => j?.text.trim()).length;
+// 그 주 글이 있는 일기 수 · 날짜와 글 지문 — 목업 일기(routine/api getJournal)
+async function journalsOf(days: Date[]): Promise<{ count: number; key: string }> {
+  const journals = (await Promise.all(days.map((d) => getJournal(dayKey(d))))).filter((j) => j?.text.trim());
+  return { count: journals.length, key: stableUuid(...journals.flatMap((j) => [j!.recordDate, j!.text.trim()])) };
 }
 
 // 주간 (R02) — anyDay가 든 주 (월요일 시작). 기록이 없는 주는 요약 없이 날짜 줄만
@@ -103,14 +104,14 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
       recorded: markOf(date) !== 'none',
     })),
     summary: weekSummary(days, relative),
-    journalDays: await journalDaysOf(days),
+    ...(await journalsOf(days).then(({ count, key }) => ({ journalDays: count, journalKey: key }))),
   };
 }
 
 // 주간 AI 요약 (R02) — 실데이터는 서버 weekly-summary가 그 주 일기로 만든 글. 목업은 고정 글에 그 주 일기 수만 맞춤
 export async function getWeekAiSummary(anyDay: Date): Promise<WeekAiSummary | null> {
   if (!isMock()) return real.getWeekAiSummary(anyDay);
-  const dayCount = await journalDaysOf(weekDays(anyDay));
+  const dayCount = (await journalsOf(weekDays(anyDay))).count;
   if (!dayCount) return null;
   return {
     text: '회의가 있는 날은 준비가 길어지는 흐름이 보였어요. 기록한 날마다 준비물을 전날 챙긴 점이 좋았어요. 다음 주에는 전날 밤 준비 루틴을 하나 만들어 보면 아침이 여유로워져요.',

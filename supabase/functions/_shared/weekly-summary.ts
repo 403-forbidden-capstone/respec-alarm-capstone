@@ -134,12 +134,14 @@ export async function handleWeeklySummary(deps: WeeklySummaryDeps, raw: unknown)
   const weekStart = parseRequest(raw);
   const weekEnd = addDays(weekStart, 6);
   const base = { week_start: weekStart, week_end: weekEnd };
-  const journals =
-    must<JournalRow[]>(
-      'daily_journals',
-      await deps.userDb.from('daily_journals').select('record_date, ai_summary, edited_summary, is_edited').eq('user_id', deps.userId).gte('record_date', weekStart).lte('record_date', weekEnd),
-    ) ?? [];
-  const days = weeklyDays(journals);
+  const readDays = async () =>
+    weeklyDays(
+      must<JournalRow[]>(
+        'daily_journals',
+        await deps.userDb.from('daily_journals').select('record_date, ai_summary, edited_summary, is_edited').eq('user_id', deps.userId).gte('record_date', weekStart).lte('record_date', weekEnd),
+      ) ?? [],
+    );
+  const days = await readDays();
   const mine = () => deps.service.from('weekly_summaries');
   const readSaved = async () =>
     must<SavedRow | null>('weekly_summaries', await mine().select('input_hash, summary, day_dates, generated_at, claimed_until').eq('user_id', deps.userId).eq('week_start', weekStart).maybeSingle());
@@ -175,6 +177,11 @@ export async function handleWeeklySummary(deps: WeeklySummaryDeps, raw: unknown)
   const claim = await deps.service.rpc('claim_weekly_summary', { p_user_id: deps.userId, p_week_start: weekStart, p_seconds: CLAIM_SECONDS });
   must('claim_weekly_summary', { data: null, error: claim.error });
   if (claim.data !== true) return waitForOther(deps, key, readSaved, out, fallback);
+  // 잠금 주인 표시 = 방금 잡은 claimed_until 값 — 저장 · 풀기는 이 값이 그대로일 때만 (모델이 30초를 넘겨 다른 요청이 새로 잡았으면 그 잠금 · 글을 건드리지 않음)
+  const token = (await readSaved())?.claimed_until ?? null;
+  if (token === null) return waitForOther(deps, key, readSaved, out, fallback); // 잡은 사이 줄이 지워짐 (그 주 일기를 모두 지운 요청)
+  // 내 잠금인 줄만 고침 (주인 표시가 그대로일 때)
+  const updateOwn = (values: Record<string, unknown>) => mine().update({ ...values, claimed_until: null }).eq('user_id', deps.userId).eq('week_start', weekStart).eq('claimed_until', token);
 
   let released = false;
   try {
@@ -200,13 +207,18 @@ export async function handleWeeklySummary(deps: WeeklySummaryDeps, raw: unknown)
     const summary = cleanSummary(r.data.summary);
     if (summary === '') return fallback(new HttpError('LLM_UNAVAILABLE', '주간 요약을 만들지 못했어요'));
 
-    const row = { input_hash: key, summary, day_dates: days.map((d) => d.date), generated_at: now.toISOString(), claimed_until: null };
-    must('weekly_summaries', await mine().upsert({ user_id: deps.userId, week_start: weekStart, model: r.call.model, ...row }, { onConflict: 'user_id,week_start' }));
-    released = true; // 저장하며 잠금도 풂
+    // 만드는 사이 일기가 더해지거나 고쳐지거나 지워졌으면 옛 기록으로 만든 글이라 저장하지 않음 — 저장된 글(stale) 또는 CONFLICT, 다음 요청이 새 기록으로 다시 만듦
+    if (weeklyKey(await readDays()) !== key) return fallback(new HttpError('CONFLICT', '기록이 바뀌어 요약을 다시 정리할게요. 잠시 뒤 다시 볼게요'));
+
+    const row = { input_hash: key, summary, day_dates: days.map((d) => d.date), generated_at: now.toISOString() };
+    // 저장하며 잠금도 풂 — 내 잠금일 때만. 0줄이면 잠금을 잃음(다른 요청이 잡았거나 줄이 지워짐) → 저장하지 않고 이번 글만 돌려줌 (지금 기록과 같은 지문이라 stale 아님)
+    const savedRows = must<{ week_start: string }[]>('weekly_summaries', await updateOwn({ ...row, model: r.call.model }).select('week_start'));
+    released = true;
+    if (!savedRows?.length) console.warn('[weekly-summary] 잠금을 잃어 저장하지 않음', { week_start: weekStart });
     return out(row, false);
   } finally {
-    // 실패로 끝나면 잠금만 풂 — 다음 요청이 30초를 기다리지 않고 다시 만들 수 있게 (풀기 실패는 30초 뒤 저절로 풀림)
-    if (!released) await mine().update({ claimed_until: null }).eq('user_id', deps.userId).eq('week_start', weekStart).then(undefined, () => undefined);
+    // 실패로 끝나면 내 잠금만 풂 — 다음 요청이 30초를 기다리지 않고 다시 만들 수 있게 (풀기 실패는 30초 뒤 저절로 풀림)
+    if (!released) await updateOwn({}).then(undefined, () => undefined);
   }
 }
 

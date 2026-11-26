@@ -18,6 +18,7 @@ import {
   alarmPatch,
   factsOf,
   hasJournalText,
+  journalKeyOf,
   isAlarmValueSuggestion,
   isApplicableValue,
   isPlanned,
@@ -166,6 +167,7 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
     loadWakeAlarmAts(userId, before[0], addDays(days[6], 1)),
   ]);
   const todayKey = dayKey(t);
+  const weekJournals = journals.filter((j) => j.record_date >= dayKey(days[0]) && hasJournalText(j));
   return {
     title: weekTitle(anyDay),
     relative,
@@ -192,7 +194,8 @@ export async function getWeek(anyDay: Date): Promise<WeekRecord> {
       today: t,
       todayWoke: records.some((r) => r.record_date === todayKey && r.wake_confirmed_at != null),
     }),
-    journalDays: journals.filter((j) => j.record_date >= dayKey(days[0]) && hasJournalText(j)).length,
+    journalDays: weekJournals.length,
+    journalKey: journalKeyOf(weekJournals),
   };
 }
 
