@@ -297,7 +297,8 @@ export default function SettingsScreen() {
         ) : profile ? (
           <LinkRow first label="알림 설정 열기" onPress={() => void openAppNotificationSettings()} />
         ) : null}
-        <LinkRow first={!profile} label="차단한 사람" value={blocks.data ? `${blocks.data.length}명` : undefined} onPress={() => router.push('/blocks')} />
+        <LinkRow first={!profile} label="학교 시간표" onPress={() => router.push('/timetable')} />
+        <LinkRow label="차단한 사람" value={blocks.data ? `${blocks.data.length}명` : undefined} onPress={() => router.push('/blocks')} />
       </Card>
 
       {enabled && user ? (
