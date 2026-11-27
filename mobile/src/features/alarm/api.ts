@@ -1,7 +1,7 @@
 // ① 약속 기반 알람 — 데이터 접근은 이 파일에서만 합니다.
 // 지금은 src/mocks의 가짜 데이터를 돌려주고, Supabase가 붙으면 이 파일 안에서만 바꿉니다.
 //   읽기 · 쓰기 위치는 docs/screen-data-map.md (H01 · H02 · H03 · H05 · H07 · H08)
-import { levelOfVoiceTone } from '@shared/calc/intensity.ts';
+import { levelOfVoiceTone, wakeSensitivityOf, type WakeSensitivity } from '@shared/calc/intensity.ts';
 import { DEFAULT_COMMON_P80, personalPrepareOf, predictPrepare, prepareStatsOf, recentPrepareOf, wakeMarginOf } from '@shared/calc/prepare.ts';
 import { hasEarlierWake, isEveningWake } from '@shared/calc/wake.ts';
 import { Platform } from 'react-native';
@@ -199,6 +199,12 @@ export async function checkDepartNow(appointmentId: string): Promise<DepartCheck
   if (!a) throw new UserError('일정을 찾을 수 없어요');
   const view = toAppointment(a);
   return toDepartCheck({ appointmentAt: view.at, travelMinutes: view.travelMinutes, source: view.travelSource, now: now() });
+}
+
+// 새 일정(H05) 알람 강도 미리 보기 — 알람 설정(H03)의 강도와 같은 입력(최근 4주 지각 · 잠귀 · 기본 말소리)
+export async function getIntensityBasis(): Promise<{ lateCount: number; wakeSensitivity: WakeSensitivity; voiceDefault: Level | null }> {
+  if (!isMock()) return real.getIntensityBasis();
+  return { lateCount: db.lateCount4w, wakeSensitivity: wakeSensitivityOf(db.wakeSensitivity), voiceDefault: levelOfVoiceTone(db.voiceTone) };
 }
 
 // 알람 설정 (H03) — 알람 없는 일정은 열 알람이 없어 null. withoutAlarms(H03만)면 알람 없는 일정도 엶 — 장소를 정하고 알람을 만들 수 있게 (D41 A)

@@ -13,7 +13,7 @@ import { requireUserId } from '@/lib/user';
 
 import { rememberDetail } from './detailCache';
 import { byTime, hasAlarms, listOnePerSeries, pickNextAlarm, toAppointment, toOccurrences, toScheduleItem, toStandaloneAppointment } from './map';
-import { loadAppointmentRows, loadAppointmentRowsSince, loadDayRows, loadDetail, loadOccurrenceRows, loadStandaloneRow, loadStandaloneRows } from './realRows';
+import { fetchIntensityPrefs, fetchLateCount, loadAppointmentRows, loadAppointmentRowsSince, loadDayRows, loadDetail, loadOccurrenceRows, loadStandaloneRow, loadStandaloneRows } from './realRows';
 import type { Appointment, AppointmentDetail, NextAlarm, Occurrence, ScheduleItem, StandaloneWake } from './types';
 
 export * from './realEdit';
@@ -24,6 +24,13 @@ export { setAlarmEnabled, setAppointmentEnabled, setIntensity } from './realWrit
 
 // 알람 목록(H02)이 읽는 지난 일정 범위 — 오늘 0시보다 이만큼 앞까지 ("지난 일정"으로 접어 둠). 작성자 판단 — 되돌리기 쉬움
 export const LIST_PAST_DAYS = 30;
+
+// 새 일정(H05) 알람 강도 미리 보기 — 저장(alarm-commit)과 같은 입력: 최근 4주 지각 · 잠귀 · 기본 말소리
+export async function getIntensityBasis() {
+  const userId = await requireUserId();
+  const [lateCount, prefs] = await Promise.all([fetchLateCount(userId, now().getTime()), fetchIntensityPrefs(userId)]);
+  return { lateCount, ...prefs };
+}
 
 // H01 다음 알람 — 지금 이후 가장 먼저 울릴 켜진 알람(기상 · 준비 · 출발)이 있는 약속. 일정 없는 알람(D46)도 제목 "알람"으로 나옴. 루틴 알람은 NextAlarm이 약속 모양을 요구해 안 나옴
 export async function getNextAlarm(): Promise<NextAlarm | null> {

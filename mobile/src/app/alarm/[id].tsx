@@ -7,9 +7,9 @@ import { Button, Card, Chip, DateSheet, EmptyState, KeyValueRow, Loading, LoadEr
 import { getAppointment, listOccurrences, listPlaces, listStandaloneWakes, previewAlarms, saveAlarmSettings } from '@/features/alarm/api';
 import { canConfirmPrepStartAt, confirmPrepStartSelfReport, loadPrepStartSelfReport } from '@/features/alarm/selfReportedPrep';
 import { isManualTime, linkWakeTimes, manualTimes, moveAlarm, orderError, resetAlarm, sameEdits, shownPreview, timeInputsChanged } from '@/features/alarm/adjust';
+import { AlarmIntensityCard } from '@/features/alarm/components/AlarmIntensityCard';
 import { FormulaBox } from '@/features/alarm/components/FormulaBox';
 import { OccurrenceList } from '@/features/alarm/components/OccurrenceList';
-import { OptionGrid } from '@/features/alarm/components/OptionGrid';
 import { PlaceSearchSheet } from '@/features/alarm/components/PlaceSearchSheet';
 import { RepeatScopeSheet } from '@/features/alarm/components/RepeatScopeSheet';
 import { ScheduleEditSheet } from '@/features/alarm/components/ScheduleEditSheet';
@@ -25,7 +25,6 @@ import {
   AXES,
   IMPORTANCE_LABEL,
   KIND_LABEL,
-  LEVELS,
   MANUAL_SOURCE,
   ORIGIN_HOME,
   PLACE_PENDING_LABEL,
@@ -41,7 +40,7 @@ import {
   type Transport,
 } from '@/features/alarm/types';
 import { now } from '@/lib/clock';
-import { ALARM_AXES_PICKER, PREP_START_SELF_REPORT_PILOT } from '@/lib/flags';
+import { PREP_START_SELF_REPORT_PILOT } from '@/lib/flags';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { addMinutes, formatDateShort, formatTime, startOfDay } from '@/lib/format';
 import { backOrHome } from '@/lib/nav';
@@ -52,7 +51,6 @@ import { useAccent } from '@/lib/skyTone';
 import { colors } from '@/theme';
 
 const NB = ' '; // 붙임 공백 — 이 자리에서는 줄이 안 바뀜
-const LEVEL_OPTIONS = LEVELS.map((l, i) => [i as Level, l.name] as const);
 
 type Levels = Record<IntensityAxis, Level | null>; // null = 자동
 
@@ -131,7 +129,6 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
   const accent = useAccent(); // 알람 시각 카드 위 흐름 줄의 지금 단계 점
   const [showFormula, setShowFormula] = useState(false); // 계산식 펼침
   const [showPrepDetail, setShowPrepDetail] = useState(false); // 준비 시간 자세히
-  const [showIntensity, setShowIntensity] = useState(false); // 알람 강도 바꾸기
   const edit = useScheduleEdit({ appointment: a, reload: () => Promise.all([reload(), reloadOccurrences()]) }); // 연결 일정 카드 → 일정 편집 시트 · 삭제 되돌리기
   const setEdit = (patch: Partial<AlarmEdits>) => setEdits((e) => ({ ...e, ...patch }));
 
@@ -171,7 +168,6 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
   const missingWake = !view.alarms.some((x) => x.kind === 'WAKE') && view.alarms.some((x) => x.kind !== 'ARRIVE'); // 울릴 알람은 있는데 기상만 없음
   const blocked = orderError(view.alarms); // 순서가 뒤집히면 저장을 막음
   const manualAny = view.alarms.some(isManualTime);
-  const anyManual = AXES.some(([axis]) => levels[axis] != null);
   const travel = edits.travelMinutes ?? view.autoTravelMinutes;
   const prepare = edits.prepareMinutes ?? view.autoPredictedPrepMinutes;
   const recentLine = view.prepareSampleCount != null ? prepareRecentLabel(view.prepareRecent ?? []) : null;
@@ -199,9 +195,6 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
     ...view.alarms.filter((x) => x.kind !== 'ARRIVE').map((x) => ({ label: KIND_LABEL[x.kind], time: formatTime(x.at) })),
     { label: '일정', time: formatTime(a.at) },
   ];
-  // 알람 강도 한 줄 요약 — 중 · 기본 소리 · 일정 안내형 · 짧게 반복
-  const lvOf = (axis: IntensityAxis): Level => levels[axis] ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto);
-  const summary = `${LEVELS[levels.sound ?? a.intensity.auto].name} · ${LEVELS[lvOf('sound')].sound} · ${LEVELS[lvOf('voice')].voice} · ${LEVELS[lvOf('vibration')].vibration}`;
   const picking = pickKind ? view.alarms.find((x) => x.kind === pickKind) : undefined;
   // 기상이 없던 일정에서 기상을 새로 켜는 중 — 시각을 고르면 이 기상만 따로 만들어짐(#624). 미리 보기가 돌아와 기상 줄이 생겨도 이 시트가 열려 있는 동안은 같은 동작
   const pickingNewWake = pickKind === 'WAKE' && !a.alarms.some((x) => x.kind === 'WAKE');
@@ -611,71 +604,14 @@ function Detail({ appointment: a, reload, changedKinds }: { appointment: Appoint
           ) : null}
         </Card>
 
-        <Card>
-          <Text variant="label" tone="sub" style={styles.label}>
-            알람 강도
-          </Text>
-          {/* 점수 식은 안 보임 — 결과와 쉬운 말만 (H05 계산 근거와 같게, D47) */}
-          <Text variant="small" tone="sub">
-            자동 {LEVELS[a.intensity.auto].name} · 중요도 {IMPORTANCE_LABEL[a.importance]}
-            {a.intensity.latePoint > 0 ? ` · 최근 4주 늦잠 지각 ${a.intensity.lateCount}번` : ''}
-          </Text>
-          {/* 축별 선택(배경음 · 말소리 · 진동)은 flag로 숨길 수 있음 — 결정 안건(투표) 결과 대기 (lib/flags.ts ALARM_AXES_PICKER) */}
-          {/* 기본은 한 줄 요약 — 바꾸기를 눌러야 배경음 · 말소리 · 진동이 펴짐 */}
-          <View style={styles.between}>
-            <Text variant="body" style={styles.summary}>
-              {summary}
-            </Text>
-            {ALARM_AXES_PICKER ? <TextLink label={showIntensity ? '접기 ›' : '바꾸기 ›'} onPress={() => setShowIntensity((v) => !v)} /> : null}
-          </View>
-          {(ALARM_AXES_PICKER && showIntensity ? AXES : []).map(([axis, name]) => {
-            const picked = levels[axis];
-            const level = picked ?? (axis === 'voice' ? a.intensity.voiceAuto : a.intensity.auto); // 말소리 자동 = 설정의 기본 말소리
-            return (
-              <View key={axis}>
-                <View style={styles.axis}>
-                  <View style={styles.axisName}>
-                    <Text variant="rowLabel" tone="sub">
-                      {name}
-                    </Text>
-                    {picked != null ? (
-                      <Text variant="tiny" tone="sub" style={styles.manual}>
-                        직접 고름
-                      </Text>
-                    ) : null}
-                  </View>
-                  <OptionGrid
-                    size="mini"
-                    label={`${name} 강도`}
-                    options={LEVEL_OPTIONS}
-                    value={level}
-                    onChange={(next) => setLevels((l) => ({ ...l, [axis]: next }))}
-                  />
-                </View>
-                <View style={styles.axisDesc}>
-                  {/* 직접 고른 항목만 이 축을 자동으로 되돌리는 링크 */}
-                  {picked != null ? (
-                    <TextLink
-                      label="자동으로"
-                      accessibilityLabel={`${name} 자동으로 되돌리기`}
-                      onPress={() => setLevels((l) => ({ ...l, [axis]: null }))}
-                    />
-                  ) : (
-                    <View />
-                  )}
-                  <Text variant="label" tone="faint" align="right" accessibilityLiveRegion="polite">
-                    {LEVELS[level][axis]}
-                  </Text>
-                </View>
-              </View>
-            );
-          })}
-          {ALARM_AXES_PICKER && showIntensity && anyManual ? (
-            <View style={styles.reset}>
-              <TextLink label="모두 자동으로 되돌리기" onPress={() => setLevels({ sound: null, voice: null, vibration: null })} />
-            </View>
-          ) : null}
-        </Card>
+        <AlarmIntensityCard
+          auto={a.intensity.auto}
+          voiceAuto={a.intensity.voiceAuto}
+          importance={a.importance}
+          lateCount={a.intensity.lateCount}
+          levels={levels}
+          onChange={setLevels}
+        />
 
         </>
       ) : (
@@ -829,7 +765,6 @@ const styles = StyleSheet.create({
   stepRail: { flexDirection: 'row', alignItems: 'center', height: 14, marginBottom: 4 },
   stepDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: colors.faint, backgroundColor: colors.card },
   stepBar: { flex: 1, height: 1.5, backgroundColor: colors.line, marginHorizontal: 4 },
-  summary: { flex: 1 },
   title: { marginTop: 8, marginBottom: 4 },
   lead: { marginBottom: 18 },
   label: { marginBottom: 8 },
@@ -837,9 +772,6 @@ const styles = StyleSheet.create({
   tail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sub: { marginTop: 4 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  axis: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12 },
-  axisName: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, gap: 6 },
-  manual: { backgroundColor: colors.chip, borderRadius: 8, paddingHorizontal: 6, overflow: 'hidden' },
   axisDesc: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   note: { marginTop: 10 },
   formulaNote: { marginBottom: 2 },
