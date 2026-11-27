@@ -245,9 +245,6 @@ export default function NewScheduleScreen() {
       <Text variant="title" style={styles.title}>
         새 일정 만들기
       </Text>
-      <View style={styles.timetableLink}>
-        <TextLink label="수업은 학교 시간표에서 한 번에 넣어요 ›" onPress={() => router.push('/timetable')} />
-      </View>
 
       <Card>
         <Text variant="label" tone="sub">
@@ -717,7 +714,6 @@ const styles = StyleSheet.create({
   foldDivider: { borderTopWidth: 1, borderTopColor: colors.line },
   foldLink: { alignSelf: 'flex-end', marginTop: 4 },
   originBody: { gap: 8, marginBottom: 8 },
-  timetableLink: { marginBottom: 12, alignSelf: 'flex-start' },
   title: { marginTop: 8, marginBottom: 12 },
   optLabel: { marginTop: 12, marginBottom: 8 },
   groupNote: { marginTop: 6, marginBottom: 4 },
