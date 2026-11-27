@@ -809,8 +809,7 @@ const CONN_NODES = [
   { t: '카카오 디벨로퍼스', s: '로그인 · 장소 · 지도', box: [900, 40, 190, 114], items: [['로그인 — 웹 · 앱 SDK', 'done'], ['REST 키 — 장소 · 길찾기', 'done'], ['지도 JS 키 · Web 도메인', 'done']] },
   { t: 'Google Cloud', s: '구글 로그인', box: [900, 170, 190, 96], items: [['OAuth 클라이언트 (웹)', 'done'], ['테스트 사용자', 'done']] },
   { t: 'Google AI Studio', s: 'Gemini 텍스트 · 음성 · Live', box: [900, 282, 190, 132], items: [['API 키 (Edge 비밀값)', 'done'], ['대화 · 일기 · 주간 요약', 'done'], ['기상 대본 · 알람 음성', 'done'], ['Live — 대화 · 아침 루틴', 'done']] },
-  { t: 'Anthropic', s: '시간표 사진', box: [900, 430, 190, 78], items: [['API 키 (Edge 비밀값)', 'done']] },
-  { t: 'UptimeRobot', s: '서버 감시', box: [900, 524, 190, 78], items: [['/health/deep 5분 · 메일', 'done']] },
+  { t: 'UptimeRobot', s: '서버 감시', box: [900, 430, 190, 78], items: [['/health/deep 5분 · 메일', 'done']] },
 ];
 // [선 경로, 상태, 글자, 글자 x · y, 정렬]
 const CONN_EDGES = [
@@ -830,7 +829,7 @@ const CONN_EDGES = [
   ['M840 210 H900', 'done', '로그인', 870, 202],
   ['M840 296 H900', 'done', 'Gemini', 870, 288],
   ['M828 400 H900', 'later', 'AI 0-8', 870, 392],
-  ['M900 560 H840', 'done', '5분마다 확인', 870, 552],
+  ['M900 466 H840', 'done', '5분마다 확인', 870, 458],
 ];
 // 남은 연결 — [이름, 링크, 설명]. 끝나면 줄을 빼고 그림 항목을 됨으로
 const CONN_TODO = [
@@ -839,7 +838,7 @@ const CONN_TODO = [
   ['예측 켜기 (prepare-ml · 순수 준비시간 v2)', 'https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/472', '예측 컨테이너는 떠 있음(/ml/health 200) · 켜기 값 꺼짐 · v2 모델 파일 · 허용 계정 기록 10건 대기 (#472, 열린 PR #549 · #555 · #554 · #573 · #587)'],
   ['AI 함수 서버 이전 (정할 일 0-8)', 'https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/477', '음성 · 대화 · 대본 · 시간표 · 주간 요약 8개는 Edge에 그대로 — 옮길지 정함 (#477)'],
   ['Cloudflare 미리보기 빌드 변수 (Previews Base)', 'https://dash.cloudflare.com/', '11/4 확인 — PR 미리보기에서 로그인 · 실데이터 안 됨. 배포 웹 · APK와는 상관없음'],
-  ['옛 빵모아 서버 지우기 · 팀원 서버 열쇠', 'https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/470', '옛 인스턴스 종료(#470) · 공용 열쇠 respec-share 전달은 맨 마지막(#529)'],
+  ['팀원 서버 열쇠 (respec-share)', 'https://github.com/403-forbidden-capstone/respec-alarm-capstone/issues/529', '팀원 서버 접속용 공용 열쇠 — 서버 안정화 뒤 맨 마지막에 카톡방으로 전달 (#529)'],
 ];
 // 다음 — 11/27 열린 이슈 [이슈 번호, 한 줄]. 11/10 분담: ① 기상 알람 = 혜린 · AI = 수연 · 화면 = 준성 · ② 친구 · 서버 = 지형. 날짜 · 상태는 할 일 스냅샷(GitHub 보드)에서 읽고 줄은 시작일 순
 const CONN_NEXT = [
@@ -849,7 +848,6 @@ const CONN_NEXT = [
   [645, '일반 알람 거두기 · 반복 회차 겹침 (미배정)'],
   [477, '② 남은 Edge 함수 서버 이전 — AI는 정할 일 0-8'],
   [472, '② 예측 서버 켜기 (보류)'],
-  [470, '② 옛 빵모아 서버 지우기 (보류)'],
   [529, '② 팀원 서버 공유 — 공용 열쇠 (맨 마지막)'],
   [45, '② 친구 · 그룹 실시간 갱신'],
   [80, '② 공유받은 알람이 바뀌면 폰 예약 바로 맞추기'],
