@@ -196,7 +196,7 @@ input.tok{font:inherit;font-size:13px;border:1px solid var(--line2);border-radiu
 .wrap:has(.side.show) .screens{grid-template-columns:176px minmax(0,1fr)}
 @media (max-width:1100px){.side iframe{zoom:.78}}
 @media (max-width:760px){.wrap{grid-template-columns:1fr}.side{position:static;height:auto;border-left:0;border-top:1px solid var(--line)}.screens{grid-template-columns:1fr}.tree{position:static;max-height:none}.grid2{grid-template-columns:1fr}}
-/* 인쇄 — 연결 탭을 A4 가로 한 장으로 (그림 + 남은 연결). 탭 · 앱 보기 · 접힌 표는 뺌 */
+/* 인쇄 — 모든 탭 공통: 탭 줄 · 앱 보기 · 접힌 표는 빼고 A4 가로. 연결 탭은 그림 + 남은 연결이 한 장에 들어가게 맞춤 */
 @media print{
   @page{size:A4 landscape;margin:8mm}
   .tabs,.side,#btnSync,#btnSide,#syncMeta,#main details,.ck-legend button{display:none!important}
@@ -535,7 +535,7 @@ const CHECKS = [
 const KINDS = {
   table: ['profiles', 'friends', 'groups', 'group_members', 'sharing_permissions', 'appointments', 'appointment_participants', 'alarms', 'alarm_events', 'daily_records', 'todos', 'routines', 'alarm_suggestions', 'conversation_sessions', 'daily_journals', 'push_tokens'],
   rpc: ['get_group_wake_status', 'get_public_profiles', 'find_profile_by_handle', 'join_group_by_invite_code', 'regenerate_invite_code', 'register_push_token'],
-  edge: ['place-search', 'place-reverse', 'alarm-suggest', 'alarm-commit', 'appointment-edit', 'alarm-roll', 'timetable-extract', 'notify', 'wake-check', 'suggestion-generate', 'suggestion-apply', 'alarm-briefing', 'alarm-events-device', 'group-status-device', 'weekly-summary', 'voice-*'],
+  edge: ['place-search', 'place-reverse', 'alarm-suggest', 'alarm-commit', 'appointment-edit', 'alarm-roll', 'timetable-extract', 'notify', 'wake-check', 'suggestion-generate', 'suggestion-apply', 'alarm-briefing', 'voice-*'],
   phone: ['alarm-core'],
 };
 // 서버 함수 — [코드 이름, 쉬운 이름, 하는 일, 외부 서비스]. 11/27 실서버 Edge 25개(마지막 배포 11/26). 알람 6개는 우리 서버가 받고 Edge는 예비(스위치 server_routes)
@@ -797,7 +797,7 @@ const CONN_NODES = [
   { t: '각자 PC', s: '로컬 개발 · 시드', box: [16, 214, 214, 114], items: [['mobile/.env · seed/.env', 'done'], ['Android SDK · 에뮬레이터', 'done'], ['서버 로컬 · 격리 Supabase', 'done']] },
   { t: 'Open-Meteo', s: '날씨 · 홈 하늘 (키 없음)', box: [16, 350, 214, 96], items: [['서울 고정 · 앱이 직접', 'done'], ['폰 위치 · 유료 키 (출시)', 'later']] },
   { t: 'Cloudflare', s: '웹 배포 · 도메인', box: [300, 40, 220, 132], items: [['respecalarm.com · api DNS', 'done'], ['친구 링크 respecalarm.com', 'done'], ['빌드 변수: 주소 · 키 · 지도', 'done'], ['미리보기 빌드 변수', 'todo']] },
-  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 192, 220, 150], items: [['환경 변수 3곳 · 서명 키', 'done'], ['카카오 네이티브 · 지도 키', 'done'], ['APK 릴리스 v0.0.9 (11/22)', 'done'], ['FCM V1 · google-services', 'done'], ['Expo Push 실제 전달 됨', 'done']] },
+  { t: 'Expo · EAS', s: '앱 빌드 · 푸시 전달', box: [300, 192, 220, 150], items: [['환경 변수 3곳 · 서명 키', 'done'], ['카카오 네이티브 · 지도 키', 'done'], ['APK 릴리스 v0.0.9 (11/22)', 'done'], ['FCM V1 · google-services', 'done'], ['Expo Push 전송 기록 있음', 'done']] },
   { t: 'Firebase', s: 'Android 푸시 (FCM)', box: [300, 362, 220, 96], items: [['프로젝트 · 서비스 계정 키', 'done'], ['Android 앱 · google-services', 'done']] },
   { t: 'Supabase', s: 'DB · 로그인 · Edge · 예약', box: [600, 40, 240, 272], hub: true, groups: [
     ['DB · 로그인', [['표 42개 · 머지하면 자동 적용', 'done'], ['카카오(앱 SDK) · 구글 · 이메일', 'done'], ['스위치 · 설정 표 (예측 · 준비)', 'done']]],
@@ -942,7 +942,7 @@ function rLinks() {
   const keys = CONN_KEYS.map(([n, w, use, share]) => `<tr><td>${/[가-힣]/.test(n) ? esc(n) : `<code>${esc(n)}</code>`}</td><td>${esc(w)}</td><td>${esc(use)}</td><td class="${share.startsWith('줘도') ? '' : 'muted'}">${esc(share)}</td></tr>`).join('');
   return `<div class="card">
     <div class="row" style="margin-bottom:4px"><h2 style="margin:0">외부 연결</h2><span class="muted">${CONN_AS_OF} 확인 · 됨 ${count('done')} · 남음 ${count('todo')} · 나중 ${count('later')}</span></div>
-    <div class="note" style="margin:0 0 6px">로그인 · DB · 실시간 · AI · 기기 키 함수는 Supabase. 알람 계산 6개와 예약 작업(반복 회차 · 저녁 제안)은 AWS EC2 위 FastAPI 서버(우리 코드, <code>api.respecalarm.com</code>)가 받음 — 서버가 카카오 · Expo Push · DB를 직접 부르고, 서버가 멈추면 Edge가 이어받음(스위치 표 <code>server_routes</code>). 남은 것은 아래 6줄. 서버 자세히 → <a href="https://github.com/403-forbidden-capstone/respec-server#readme" target="_blank" rel="noopener">서버 레포 README</a></div>
+    <div class="note" style="margin:0 0 6px">로그인 · DB · 실시간 · AI · 기기 키 함수는 Supabase. 알람 계산 6개와 예약 작업(반복 회차 · 저녁 제안)은 AWS EC2 위 FastAPI 서버(우리 코드, <code>api.respecalarm.com</code>)가 받음 — 서버가 카카오 · Expo Push · DB를 직접 부르고, 서버가 멈추면 Edge가 이어받음(스위치 표 <code>server_routes</code>). 남은 것은 아래 ${CONN_TODO.length}줄. 서버 자세히 → <a href="https://github.com/403-forbidden-capstone/respec-server#readme" target="_blank" rel="noopener">서버 레포 README</a></div>
     <div class="conn-wrap">${connSvg()}</div>
     <div class="conn-legend"><span><i></i>됨</span><span><i class="todo"></i>남음</span><span><i class="later"></i>나중 (AI 이전 · 예측 · 출시 때)</span><span>틸 테두리 = Supabase · 점선 = AWS EC2(빌린 컴퓨터) · 연한 틸 상자 = 그 안에서 도는 FastAPI 서버</span></div>
   </div>
