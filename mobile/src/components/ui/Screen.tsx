@@ -1,4 +1,5 @@
 import { useScrollToTop } from 'expo-router';
+import { BottomTabBarHeightContext } from 'expo-router/js-tabs';
 import { NavigationContext, NavigationRouteContext } from 'expo-router/react-navigation';
 import { use, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
@@ -35,6 +36,7 @@ export function Screen({ children, scroll = true, footer, contentStyle, onRefres
   const navigation = use(NavigationContext);
   const route = use(NavigationRouteContext);
   const inNavigation = navigation != null && route != null;
+  const inTabs = use(BottomTabBarHeightContext) !== undefined; // 아래 탭 내비게이터 안인지 (밖이면 undefined — useBottomTabBarHeight는 밖에서 오류라 컨텍스트를 직접 읽음)
   const [refreshing, setRefreshing] = useState(false);
   const { base } = useSkyTone(); // 바탕 톤 — 그 시각 하늘 색이 살짝 섞인 색 (lib/skyTone)
 
@@ -48,8 +50,9 @@ export function Screen({ children, scroll = true, footer, contentStyle, onRefres
     }
   }
 
-  // 웹 미리 보기는 안전 영역을 기기 값 그대로 더해서 탭 화면 아래(탭 막대 위)에도 빈 틈이 생기므로 footer가 있을 때만 (폰은 겹친 만큼만 잡아 줌)
-  const edges = Platform.OS === 'web' && !footer ? (['top'] as const) : (['top', 'bottom'] as const);
+  // 탭 화면은 탭 막대(TabBar)가 아래 안전 영역을 이미 잡으므로 여기서는 위만 (안 그러면 안드로이드에서 탭 막대 위에 같은 높이의 빈 띠가 한 번 더 생김)
+  // 탭 밖 화면은 폰에서 위 · 아래 모두. 웹 미리 보기는 안전 영역을 기기 값 그대로 더해 빈 틈이 생기므로 footer가 있을 때만 아래도
+  const edges = inTabs || (Platform.OS === 'web' && !footer) ? (['top'] as const) : (['top', 'bottom'] as const);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: base }]} edges={edges}>
