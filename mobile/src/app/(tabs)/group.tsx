@@ -80,7 +80,7 @@ export default function GroupScreen() {
   // 직접 고른 칸은 같은 열기 요청일 때만 유지 — 다른 화면이 새로 열면(open 값이 바뀜) 그 칸(seg)으로 (목업 A.openGroup)
   const request = `${seg ?? ''}:${open ?? ''}`;
   const [picked, setPicked] = useState<{ request: string; tab: Tab } | null>(null);
-  const tab: Tab = picked && picked.request === request ? picked.tab : seg === 'group' ? 'group' : 'friend';
+  const tab: Tab = picked && picked.request === request ? picked.tab : seg === 'friend' ? 'friend' : 'group';
   const setTab = (next: Tab) => setPicked({ request, tab: next });
   const { data, error, reload } = useWakeLoad(loadSocial, (d) => d.groups.map((g) => g.id)); // 그룹 기상 신호가 오면 오늘 기상 수를 다시 읽음
   useEffect(() => {
