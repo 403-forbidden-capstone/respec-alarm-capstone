@@ -6,25 +6,21 @@
 import { UserError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 
-import { CONSENT_FAILED, NO_MEMBERS } from '../groupTexts';
 import { parseRelation } from '../permissions';
 import {
   friendBetween,
   friendIds,
   friendShareSet,
   givenTo,
-  groupShareSet,
   joinedIds,
   myGroup,
   myGroups,
-  myOptIn,
-  myTripOptIn,
   personOf,
   receivedRows,
   sharedGroups,
 } from '../snapshot';
 import type { FinalGrant, PermissionSet, Person, Relation, RelationId } from '../types';
-import { setTripShareOptIn, setWakeShareOptIn } from './groups';
+import { readCommonRule, writeCommonRule } from './commonRule';
 import { invalidateSnapshot, loadSnapshot } from './load';
 
 // 친구 권한 (F02) — 이 친구가 내 정보에 대해 가진 최종 권한과 출처. 친구가 아니면 null (그룹원 · 나를 주소로 열어도)
@@ -64,7 +60,7 @@ export async function getRelation(id: RelationId): Promise<Relation | null> {
 export async function getShareSettings(id: RelationId): Promise<PermissionSet> {
   const s = await loadSnapshot();
   const { kind, key } = parseRelation(id);
-  return kind === 'friend' ? friendShareSet(s, key) : groupShareSet(s, key);
+  return kind === 'friend' ? friendShareSet(s, key) : readCommonRule({ p_group_id: key });
 }
 
 // F03 [변경사항 저장]
@@ -74,8 +70,6 @@ export async function getShareSettings(id: RelationId): Promise<PermissionSet> {
 export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   const s = await loadSnapshot();
   const { kind, key } = parseRelation(id);
-  const editAlarm = next.editAlarm;
-  const viewAlarm = next.viewAlarm || editAlarm;
 
   if (kind === 'friend') {
     const friend = friendBetween(s, key);
@@ -83,7 +77,7 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
     const { error } = await supabase
       .from('sharing_permissions')
       .upsert(
-        { owner_id: s.me, grantee_id: key, source_type: 'FRIEND', source_id: friend.friend_id, can_view_alarm: viewAlarm, can_edit_alarm: editAlarm, can_view_wake: false },
+        { owner_id: s.me, grantee_id: key, source_type: 'FRIEND', source_id: friend.friend_id, can_view_alarm: false, can_edit_alarm: false, can_view_wake: next.viewWake },
         { onConflict: 'owner_id,grantee_id,source_type,source_id' },
       );
     invalidateSnapshot();
@@ -92,31 +86,7 @@ export async function saveShareSettings(id: RelationId, next: PermissionSet) {
   }
 
   if (!myGroup(s, key)) throw new UserError('참여 중인 그룹을 찾을 수 없어요');
-  const { data, error } = await supabase.rpc('save_group_permissions', { p_group_id: key, p_can_view_alarm: viewAlarm, p_can_edit_alarm: editAlarm });
-  invalidateSnapshot();
-  if (error) throw error;
-  const status = (data as { status?: unknown } | null)?.status;
-  if (status === 'NO_MEMBERS') throw new UserError(NO_MEMBERS);
-  if (status === 'NOT_FOUND') throw new UserError('참여 중인 그룹을 찾을 수 없어요');
-  if (status !== 'OK') throw new Error(`save_group_permissions: 모르는 상태 ${String(status)}`);
-  if (next.viewWake !== myOptIn(s, key)) {
-    // 알람 권한은 이미 저장된 뒤 — 동의만 못 바꿨으면 그 사실을 알리고(다시 저장하면 같은 요청이라 안전), 화면은 저장된 값을 다시 읽게 함
-    try {
-      await setWakeShareOptIn(key, next.viewWake);
-    } catch (e) {
-      throw new UserError(CONSENT_FAILED);
-    }
-  }
-  // 출발 · 도착 공유 — 기상 공유가 꺼지면 같이 꺼짐 (위에서 기상 동의를 끈 경우 setWakeShareOptIn이 이미 같이 껐으므로 건너뜀)
-  const wantTrip = next.viewWake && !!next.viewTrip;
-  const clearedWithWake = !next.viewWake && myOptIn(s, key);
-  if (wantTrip !== myTripOptIn(s, key) && !clearedWithWake) {
-    try {
-      await setTripShareOptIn(key, wantTrip);
-    } catch (e) {
-      throw new UserError(CONSENT_FAILED);
-    }
-  }
+  await writeCommonRule(key, next);
 }
 
 // 이 관계에서 받은 권한 (F03 받은 권한) — 효력 있는 값 (동의 안 한 그룹의 기상 조회는 꺼진 것으로)
@@ -138,5 +108,5 @@ export async function getReceived(id: RelationId): Promise<{ person: Person; per
     });
 }
 
-const pick = (r: PermissionSet): PermissionSet => ({ viewAlarm: r.viewAlarm, editAlarm: r.editAlarm, viewWake: r.viewWake });
+const pick = (r: PermissionSet): PermissionSet => ({ viewAlarm: r.viewAlarm, editAlarm: r.editAlarm, viewWake: r.viewWake, viewTrip: r.viewTrip });
 

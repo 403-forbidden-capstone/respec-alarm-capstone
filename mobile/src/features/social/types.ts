@@ -25,7 +25,7 @@ export type WakeState = {
 // DB sharing_permissions의 can_view_alarm · can_edit_alarm · can_view_wake
 //   viewTrip = 그룹 출발 · 도착 공유 (group_members.trip_share_opt_in) — 그룹 관계에만 있음. 친구 관계 · 권한 행에는 없어 비어 있으면 꺼짐
 export type Permission = 'viewAlarm' | 'editAlarm' | 'viewWake' | 'viewTrip';
-export type PermissionSet = Record<'viewAlarm' | 'editAlarm' | 'viewWake', boolean> & { viewTrip?: boolean };
+export type PermissionSet = Record<'viewAlarm' | 'editAlarm' | 'viewWake', boolean> & { viewTrip?: boolean; ruleVersion?: string; accepted?: boolean; acceptedCount?: number; memberCount?: number };
 
 // 알람 조회를 켤 때 보이는 것 · 안 보이는 것 안내 한 줄 (친구 13-다 · 13-사 — 켤 때 따로 동의를 받지 않으므로 F03에서 미리 알림)
 export const VIEW_ALARM_NOTE = '일정 장소도 보여요 · 집 · 출발지는 안 보여요';
@@ -49,7 +49,7 @@ export const TRIP_NEEDS_WAKE = '내 기상 공개를 켜야 켤 수 있어요';
 // F03 스위치 목록 — 친구 관계에는 기상 조회가 없음(그룹 기상 공유 동의 하나로만, 친구 6장 6-가). 그룹 관계의 기상 조회는 그 그룹에 내 기상 공유를 켜는 동의
 //   출발 · 도착 공유는 그룹 관계에만 (맨 끝)
 export const permissionsFor = (kind: 'friend' | 'group'): readonly { key: Permission; name: string; description: string }[] =>
-  kind === 'friend' ? PERMISSIONS.filter((p) => p.key !== 'viewWake') : [...PERMISSIONS, TRIP_PERMISSION];
+  kind === 'friend' ? PERMISSIONS.filter((p) => p.key === 'viewWake') : [...PERMISSIONS, TRIP_PERMISSION];
 
 // 관계 하나에서 준(받은) 권한 — DB sharing_permissions의 source_type · source_id
 // sourceId: 그룹이면 group_id, 친구면 상대 사람 id (실데이터는 friends.friend_id로 찾아 사람으로 바꿈)

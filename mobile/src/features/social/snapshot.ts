@@ -110,7 +110,8 @@ function wakeOnlyRows(s: Snapshot, ownerId: string, otherId: string, existing: r
   return sharedGroups(s, otherId)
     .filter((g) => !existing.some((r) => r.sourceType === 'GROUP' && r.sourceId === g.group_id))
     .filter((g) => s.members.some((m) => m.group_id === g.group_id && m.user_id === ownerId && m.invite_status === 'JOINED' && m.wake_share_opt_in))
-    .map((g): GrantRow => ({ source: g.group_name, sourceType: 'GROUP', sourceId: g.group_id, viewAlarm: false, editAlarm: false, viewWake: true }));
+    .filter((g) => s.members.some((m) => m.group_id === g.group_id && m.user_id === (ownerId === s.me ? otherId : s.me) && m.invite_status === 'JOINED' && m.wake_share_opt_in))
+    .map((g): GrantRow => ({ source: g.group_name, sourceType: 'GROUP', sourceId: g.group_id, viewAlarm: false, editAlarm: false, viewWake: true, viewTrip: s.members.some((m) => m.group_id === g.group_id && m.user_id === ownerId && m.trip_share_opt_in) }));
 }
 
 // 내가 이 사람에게 준 권한 — 같은 규칙으로 효력 있는 값 (F02 "이 친구가 내 정보에 가진 최종 권한")
@@ -134,7 +135,7 @@ export function friendShareSet(s: Snapshot, otherId: string): PermissionSet {
   const row = s.perms.find(
     (p) => p.owner_id === s.me && p.grantee_id === otherId && p.source_type === 'FRIEND' && effectiveOf(p, s.friends, s.members) != null,
   );
-  return row ? { ...permissionOf(row), viewWake: false } : noPermission(); // 친구 출처에는 기상 조회가 없음 (그룹 동의 하나로만, 6-가)
+  return row ? { viewAlarm: false, editAlarm: false, viewWake: row.can_view_wake } : noPermission();
 }
 
 // F03 · G01 · G02 — 그룹에 준 값. 권한 행은 멤버마다 있어서(D18 열림) 모두 합쳐 한 벌로 보임
