@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { BottomTabBarHeightContext } from 'expo-router/js-tabs';
-import { createElement } from 'react';
+import { createElement, type ComponentProps } from 'react';
 import { Platform, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { act, create } from 'react-test-renderer';
@@ -12,7 +12,7 @@ function edgesOf(inTabs: boolean, os: 'android' | 'web', footer?: boolean) {
   const original = Platform.OS;
   Object.defineProperty(Platform, 'OS', { value: os, configurable: true });
   try {
-    const screen = createElement(Screen, { footer: footer ? createElement(Text, null, 'f') : undefined, children: createElement(Text, null, 'x') });
+    const screen = createElement(Screen, { footer: footer ? createElement(Text, null, 'f') : undefined } as ComponentProps<typeof Screen>, createElement(Text, null, 'x'));
     let r!: ReturnType<typeof create>;
     act(() => {
       r = create(inTabs ? createElement(BottomTabBarHeightContext.Provider, { value: 82 }, screen) : screen);
